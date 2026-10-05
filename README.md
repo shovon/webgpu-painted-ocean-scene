@@ -12,3 +12,4 @@ A demo of painting a scene entirely on one triangle using fragment shaders.
 - ray-marched clouds
 - skybox
 - parallax shading feathers simulation
+- tone mapping

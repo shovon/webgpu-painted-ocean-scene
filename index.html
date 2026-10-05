@@ -181,11 +181,13 @@
     <label>Cloud churn <output id="o-wind"></output>
       <input id="wind" type="range" min="0" max="1" step="0.01" value="0.25"></label>
     <label>March steps <output id="o-steps"></output>
-      <input id="steps" type="range" min="16" max="128" step="4" value="20"></label>
+      <input id="steps" type="range" min="16" max="128" step="4" value="28"></label>
     <label>Scene resolution <output id="o-scene"></output>
       <input id="scene" type="range" min="0.25" max="2" step="0.05" value="1"></label>
+    <label>Sea resolution <output id="o-seaRes"></output>
+      <input id="seaRes" type="range" min="0.25" max="1" step="0.05" value="0.7"></label>
     <label>Cloud resolution <output id="o-scale"></output>
-      <input id="scale" type="range" min="0.1" max="1" step="0.05" value="0.3"></label>
+      <input id="scale" type="range" min="0.1" max="1" step="0.05" value="0.5"></label>
     <label class="check"><input id="holdFps" type="checkbox" checked> Hold 60 fps by lowering resolution</label>
     <label class="check"><input id="waveMarch" type="checkbox" checked> Waves have real height</label>
     <label class="check"><input id="caustics" type="checkbox" checked> Caustics on the seabed</label>
@@ -194,8 +196,10 @@
     <label class="check"><input id="cloudGrid" type="checkbox"> Clouds on a grid</label>
     <label class="check"><input id="wavesOn" type="checkbox" checked> Waves</label>
     <label class="check"><input id="bedOn" type="checkbox" checked> Seabed shape</label>
+    <label class="check"><input id="sandOn" type="checkbox" checked> Sand waves</label>
     <label class="check"><input id="bedCache" type="checkbox" checked> Seabed cache</label>
     <label class="check"><input id="coralOn" type="checkbox" checked> Coral</label>
+    <label class="check"><input id="coralFocus" type="checkbox" checked> Coral detail where you look</label>
     <label class="check"><input id="fish" type="checkbox" checked> Fish</label>
     <label class="check"><input id="birdsOn" type="checkbox" checked> Birds</label>
     <label class="check"><input id="followBird" type="checkbox"> Follow a bird</label>
@@ -323,7 +327,7 @@ struct Uniforms {
   q : vec4f,            // seabed cache: the map position at its middle (x, z), metres per sample, cache on/off
   r : vec4f,            // distance in metres beyond which clouds are drawn as cheap stand-ins, show home walls on/off, home size in metres, coral spikes 0..1
   s : vec4f,            // coral band: how far in from a patch's edge the coral reaches before the sand middle starts, how far out past the edge it grows, bird shadows on/off, feather sheen on/off
-  v : vec4f,            // height of the point the camera orbits, unused, unused, unused
+  v : vec4f,            // height of the point the camera orbits, sea buffer resolution.xy, coral detail where you look on/off
   // The wave trains, worked out by the page once per frame instead of here once per pixel. Two
   // entries per train: (direction x, direction z, wavenumber, angular speed) and
   // (relative steepness, phase, phase of its backward-running partner, wavelength in metres).
@@ -379,6 +383,21 @@ struct Predator {
 @group(1) @binding(10) var cloudNearTex : texture_2d<f32>;
 // The seabed cache: the bed's shape around the camera, worked out once and stored (see bedLookup)
 @group(1) @binding(11) var bedTex : texture_2d<f32>;
+// The sea, drawn by its own pass into a buffer smaller than the screen (see fs_sea)
+@group(1) @binding(12) var seaTex : texture_2d<f32>;
+// How many screen pixels one pixel of the pass being drawn stands for, along each axis: 1 normally,
+// more while the sea is being drawn into its smaller buffer. Everything that fades out fine detail
+// by pixel size uses this, so the smaller buffer does not try to show detail it cannot hold.
+var<private> pixelScale : f32 = 1.0;
+// How close the pixel being drawn is to the height you are looking at: 1 along the middle row of
+// the screen, right across its width, falling to 0 about a third of the screen's height above and
+// below. Coral in that band is given its branches from much further off. (A band and not a disc:
+// across the water, everything at one height on the screen is at about one distance, so a band
+// treats coral at the same range alike, and its edges run level like the horizon.)
+var<private> viewFocus : f32 = 0.0;
+// The size of a pixel where its view ray meets the sea, measured square to the ray, in metres.
+// (`footprint` is the stretch of sea surface it covers, which is much longer at a shallow angle.)
+var<private> pixelAcross : f32 = 1.0;
 const BIRD_STRIDE : u32 = BIRD_PER_CELL + 1u;
 
 const BOUND_R : f32 = 3.0;
@@ -646,16 +665,66 @@ fn sunUp() -> vec3f {
 // The map holds the centre cloud's shadow. Follow the sun's ray up from the point to cloud height,
 // find the grid site there, and reuse the map shifted and scaled to that site's cloud. Other
 // clouds therefore cast the centre cloud's shadow shape, at their own size and position.
-fn cloudShadowFromMap(p : vec3f) -> f32 {
-  let sunDir = u.c.xyz;
-  let atCloudHeight = p + sunDir * (max(-p.y, 0.0) / max(sunDir.y, 0.05));
-  let site = cloudNear(atCloudHeight.xz);
-  if (!site.present) { return 1.0; }
-  let local = (p - site.centre) / site.scale;
-  let uv = vec2f(dot(local, sunRight()), dot(local, sunUp())) / BOUND_R * 0.5 + 0.5;
-  // A cloud that has thinned away casts a correspondingly faint shadow
-  return mix(1.0, textureSampleLevel(shadowTex, linearSamp, uv, 0.0).r, smoothstep(-0.4, -0.1, site.cover));
+// Which clouds might shade a point. Working out the clouds at the nearby sites is the costly part
+// of a shadow, so it is split from reading their shadows. A water pixel needs the shadow at two
+// places: where its view ray meets the surface (for the sun's glint and the glow of the water), and
+// where the sunlight that lights the sea floor came in through the surface. The two can be several
+// metres apart, because both the view and the sunlight travel at a slant through the water. The
+// clouds are gathered once, around the second place, since the floor's shadow is the one that is
+// plainly seen, and the same clouds are then used for the first.
+//
+// Every cloud that could reach the point is gathered, not just the nearest. Scattered clouds can be
+// larger than the gaps between them, and a big cloud's shadow falls well inside the territory of a
+// small neighbour (or of an empty site). Taking only the nearest cloud cut the big one's shadow off
+// along the straight line halfway to that neighbour.
+struct ShadeSites {
+  site : array<CloudSite, 9>,
+  count : i32,
 }
+fn cloudShadowSites(p : vec3f) -> ShadeSites {
+  var found : ShadeSites;
+  found.count = 0;
+  let sunDir = u.c.xyz;
+  let scattered = u.p.z < 0.5;
+  // Follow the sunlight up from the point to about the height of the clouds' middles
+  let cloudsAt = select(0.0, CLUSTER_BASE + 0.8, scattered);
+  let up = p + sunDir * (max(cloudsAt - p.y, 0.0) / max(sunDir.y, 0.05));
+  // On the regular grid, the four sites round the cell; scattered, the nearest site and the eight round it
+  let base = cloudCell(up.xz + select(vec2f(0.0), cloudHalfCell(), scattered));
+  let first = select(0, -1, scattered);
+  for (var j = first; j < 2; j++) {
+    for (var i = first; i < 2; i++) {
+      let site = cloudAt(base + vec2f(f32(i), f32(j)));
+      if (!site.present) { continue; }
+      found.site[found.count] = site;
+      found.count++;
+    }
+  }
+  return found;
+}
+// The sunlight left at a point after every one of those clouds has had its share
+fn cloudShadowFrom(found : ShadeSites, p : vec3f) -> f32 {
+  var light = 1.0;
+  for (var n = 0; n < found.count; n++) {
+    let site = found.site[n];
+    let local = (p - site.centre) / site.scale;
+    let uv = vec2f(dot(local, sunRight()), dot(local, sunUp())) / BOUND_R * 0.5 + 0.5;
+    // Outside the square the shadow map covers there is no shadow from this cloud (reading the map
+    // there would repeat whatever is at its edge)
+    if (any(abs(uv - 0.5) > vec2f(0.5))) { continue; }
+    // A cloud that has thinned away casts a correspondingly faint shadow
+    light *= mix(1.0, textureSampleLevel(shadowTex, linearSamp, uv, 0.0).r, smoothstep(-0.4, -0.1, site.cover));
+  }
+  return light;
+}
+fn cloudShadowFromMap(p : vec3f) -> f32 {
+  // With the clouds switched off there is no shadow, and no need to look for clouds
+  if (u.p.x < 0.5) { return 1.0; }
+  return cloudShadowFrom(cloudShadowSites(p), p);
+}
+// The cloud shadow at the surface for the water pixel being shaded (worked out in waterBody along
+// with the floor's, and read back by shadeWater)
+var<private> seaShadowAtSurface : f32 = 1.0;
 
 fn hg(mu : f32, g : f32) -> f32 {
   let g2 = g * g;
@@ -889,7 +958,47 @@ fn skyView(ro : vec3f, rd : vec3f) -> SkyView {
 }
 
 // Everything behind the clouds for one view ray: the sea if the ray meets it, otherwise the sky.
-fn backdrop(ro : vec3f, rd : vec3f) -> vec3f {
+// ---------- the sea at lower resolution ----------
+// Nearly all the work in a frame is done for pixels that show the sea: finding the waves, the bed,
+// the coral, the fish and their light. So the sea can be drawn by a pass of its own into a buffer
+// smaller than the screen, and the final pass, which still decides at full resolution what is sea
+// and what is sky, reads its sea color from that buffer. Sky, clouds and birds are unaffected.
+@fragment
+fn fs_sea(@builtin(position) frag : vec4f) -> @location(0) vec4f {
+  // This buffer is smaller than the screen; find the full-resolution position of this pixel's centre
+  let fullPx = frag.xy / u.v.yz * u.a.xy;
+  pixelScale = u.a.y / u.v.z;
+  viewFocus = u.v.w * (1.0 - smoothstep(0.08, 0.32, abs(fullPx.y / u.a.y - 0.5)));
+  let ro = u.b.xyz;
+  let rd = viewRay(fullPx);
+  let hit = waterHit(ro, rd);
+  // Alpha says whether this pixel saw the sea at all, so the final pass can leave out ones that did not
+  if (hit.t >= 1e8) { return vec4f(0.0); }
+  return vec4f(shadeWater(hit.surf - hit.rd * hit.t, hit.rd, hit.t, skyView(ro, rd).color), 1.0);
+}
+
+// The sea's color for a pixel of the screen. With the sea buffer at full size, it is worked out
+// directly. Otherwise it is blended from the four nearest pixels of the sea buffer, counting only
+// those that saw the sea: along the horizon some of the four looked over it into the sky.
+fn seaColor(px : vec2f, ro : vec3f, rd : vec3f, t : f32, hazeCol : vec3f) -> vec3f {
+  if (u.v.y >= u.a.x - 0.5) { return shadeWater(ro, rd, t, hazeCol); }
+  let at = px / u.a.xy * u.v.yz - 0.5;
+  let base = floor(at);
+  let f = at - base;
+  let last = vec2i(u.v.yz) - 1;
+  var total = vec4f(0.0);
+  for (var j = 0; j < 2; j++) {
+    for (var i = 0; i < 2; i++) {
+      let texel = textureLoad(seaTex, clamp(vec2i(base) + vec2i(i, j), vec2i(0), last), 0);
+      let weight = select(1.0 - f.x, f.x, i == 1) * select(1.0 - f.y, f.y, j == 1) * texel.a;
+      total += vec4f(texel.rgb * weight, weight);
+    }
+  }
+  if (total.a < 1e-3) { return shadeWater(ro, rd, t, hazeCol); }      // none of the four saw the sea: work it out here
+  return total.rgb / total.a;
+}
+
+fn backdrop(px : vec2f, ro : vec3f, rd : vec3f) -> vec3f {
   let view = skyView(ro, rd);
   // The camera orbits the top of the planet, which is the world origin, so its own xz is its
   // position relative to the orbit point
@@ -899,7 +1008,7 @@ fn backdrop(ro : vec3f, rd : vec3f) -> vec3f {
     // Hand the flat-sea shading an equivalent ray: same arrival point, angle and distance.
     // Distant sea fades into the sky color for this direction, and the horizon clouds show
     // through the haze in the same proportion.
-    let sea = shadeWater(hit.surf - hit.rd * hit.t, hit.rd, hit.t, view.color);
+    let sea = seaColor(px, hit.surf - hit.rd * hit.t, hit.rd, hit.t, view.color);
     let f = min(hit.t, HAZE_LIMIT) * HAZE;
     let hazed = 1.0 - exp(-f * f);
     return sea * (1.0 - far.a * hazed) + far.rgb * hazed;
@@ -1187,6 +1296,8 @@ fn sandDepthAt(xz : vec2f) -> f32 {
   // Sand waves: ridges a few metres apart, lying across the direction the water moves. They do not
   // move. Noise bends the crests and makes them fork, and leaves some areas smooth; the second
   // harmonic gives each ridge a sharper crest and a flatter trough than a plain sine.
+  // With the Sand waves box unticked (or the slider at zero) none of this is worked out.
+  if (u.i.w <= 0.0) { return bumpy; }
   let across = vec2f(cos(WIND_ANGLE), sin(WIND_ANGLE));
   let phase = dot(across, xz) * 1.25 + 7.0 * vnoise(vec3f(xz * 0.11, 8.0));
   let patches = smoothstep(0.3, 0.6, vnoise(vec3f(xz * 0.045, 20.0)));
@@ -1771,17 +1882,14 @@ fn headTops(xz : vec2f) -> f32 {
 // spot moves, so the layer swells up over a coral patch like a blanket laid across it.
 fn fishFloor(xz : vec2f) -> f32 {
   // Where the bed here is well below swimming depth, nothing within reach can be tall enough to
-  // lift the layer (coral stands at most 1.1 m), so the eight surrounding spots need not be looked at
+  // lift the layer (coral stands at most 1.1 m), so the surrounding spots need not be looked at
   let here = headTops(xz);
   if (here > u.l.z + u.l.x + 1.7) { return here; }
   let k = 14.0;         // how sharply the shallowest spot dominates
-  var total = exp(-k * here);
-  for (var i = 0; i < 4; i++) {
-    let turn = 1.5708 * f32(i);
-    let way = vec2f(cos(turn), sin(turn));
-    total += exp(-k * headTops(xz + way * 0.25));
-    total += exp(-k * headTops(xz + vec2f(way.x - way.y, way.x + way.y) * 0.42));     // the diagonals, 60 cm out
-  }
+  // Four spots round this one, 45 cm out. (This reads the coral's smoothed surface plus a fixed
+  // allowance for heads and branches, which changes too gently for more spots to find anything new.)
+  let total = exp(-k * here) + exp(-k * headTops(xz + vec2f(0.32, 0.32))) + exp(-k * headTops(xz + vec2f(-0.32, 0.32)))
+            + exp(-k * headTops(xz + vec2f(0.32, -0.32))) + exp(-k * headTops(xz + vec2f(-0.32, -0.32)));
   // (Summing, not averaging, makes this come out a little shallower than the shallowest spot
   // instead of a little deeper, so the roughness of the coral can only add to the fish's clearance.)
   return -log(total) / k;
@@ -1869,10 +1977,14 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     // Sand ripples: the hand-width ridges on top of the sand waves. Too small to matter for depth,
     // so they only tilt the sand's surface, and they are dropped where a pixel is too coarse to show
     // them. Coral covers them.
-    let rippleDir = vec2f(cos(WIND_ANGLE + 0.5), sin(WIND_ANGLE + 0.5));
-    let ripplePhase = dot(rippleDir, bxz) * 11.0 + 5.0 * vnoise(vec3f(bxz * 0.6, 2.0));
-    let rippleSlope = 0.45 * u.i.w * cos(ripplePhase) * clamp(0.15 / footprint - 0.5, 0.0, 1.0) * (1.0 - cover);
-    bedNormal = normalize(bedNormal - vec3f(rippleDir.x, 0.0, rippleDir.y) * rippleSlope);
+    // Skipped entirely with the Sand waves box unticked, and where there is nothing to show.
+    let rippleShow = u.i.w * clamp(0.15 / footprint - 0.5, 0.0, 1.0) * (1.0 - cover);
+    if (rippleShow > 0.0) {
+      let rippleDir = vec2f(cos(WIND_ANGLE + 0.5), sin(WIND_ANGLE + 0.5));
+      let ripplePhase = dot(rippleDir, bxz) * 11.0 + 5.0 * vnoise(vec3f(bxz * 0.6, 2.0));
+      let rippleSlope = 0.45 * rippleShow * cos(ripplePhase);
+      bedNormal = normalize(bedNormal - vec3f(rippleDir.x, 0.0, rippleDir.y) * rippleSlope);
+    }
 
     // Shadows on the bed: climb from this spot back toward the sun along the bent sunlight and
     // check, at a few heights, whether the bed stands higher than the ray there.
@@ -1896,21 +2008,51 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     // trees stand on the heads and follow their shape.
     // Branches are only a centimetre or two thick, so this is done where pixels are fine enough
     // to show them, and faded out beyond.
-    let branchShow = u.r.w * clamp(0.035 / footprint - 0.6, 0.0, 1.0) * step(0.02, bed.core) * (1.0 - smoothstep(0.25, 0.7, bed.middle));
+    // `branchNear` is 1 where a pixel covers under about 1.8 cm of seabed and 0 beyond about 4.7 cm.
+    // It fades the branches out, and it also sets how much work is spent on them: where they are
+    // about to fade away, fewer steps are allowed for finding them and for their shadows.
+    //
+    // Near the middle of the view there is a second, more generous rule. The first rule goes by
+    // how much seabed a pixel covers, which at a shallow angle is a long strip, so coral seen
+    // across the water loses its branches at a few metres. But branches stand up from the bed, and
+    // looking across at them they are seen side on: what matters for whether one can be drawn is
+    // the pixel's size square to the view, which is far smaller. Where you are looking, branches
+    // are kept until that reaches about 8 cm. At that range they are drawn no thinner than a
+    // pixel, so they are coarser than life, but they do not shimmer.
+    let branchNear = max(clamp(0.028 / footprint - 0.6, 0.0, 1.0), viewFocus * clamp(0.05 / pixelAcross - 0.6, 0.0, 1.0));
+    let branchShow = u.r.w * branchNear * step(0.02, bed.core) * (1.0 - smoothstep(0.25, 0.7, bed.middle));
     if (branchShow > 0.0) {
       let share = 0.95 * u.r.w;                     // the fraction of squares with a tree
       let drop = max(-t.y, 1e-3);                   // metres of depth gained per metre along the ray
       var dv = max(depth - (BRANCH_TOP + 0.25), 0.0);
       var touched = false;
       var at = vec3f(0.0);                          // where it touched: x, height above the heads, z
-      for (var i = 0; i < 40; i++) {
+      let steps = i32(mix(16.0, 40.0, branchNear));
+      // Heights along the way are measured from the heads' smoothed surface, which is one read of
+      // the seabed cache, shifted by however far the head the ray lands on stands above or below
+      // that. Working out the individual heads under every step would cost far more, and all it
+      // would change is whether a tree's foot sits a few centimetres into a head or just off it.
+      let headShift = depthAt(bxz, 1e3) - depth;
+      var inLayer = false;
+      for (var i = 0; i < steps; i++) {
         let q = surf.xz + slide * dv;
-        let height = depthAt(q, footprint) - dv;
+        let height = depthAt(q, 1e3) - headShift - dv;
         if (height <= 0.0) { break; }
+        // While the ray is still above the layer, nothing can be in its way, so it drops straight
+        // to the layer's top (with a margin for the unevenness of the heads)
+        if (!inLayer) {
+          let over = height - BRANCH_TOP - 0.1;
+          if (over > 0.0) {
+            dv += max(over * 0.7, 0.01) * drop;
+            if (dv >= depth) { break; }
+            continue;
+          }
+          inLayer = true;
+        }
         var clear = height - BRANCH_TOP;            // above the layer, a branch is at least this far off
         if (clear < 0.02) {
           clear = branchScene(vec3f(q.x, height, q.y), share);
-          if (clear < 0.0015 + 0.3 * footprint) { touched = true; at = vec3f(q.x, height, q.y); break; }
+          if (clear < 0.0015 + 0.5 * pixelAcross) { touched = true; at = vec3f(q.x, height, q.y); break; }
         }
         dv += min(clear, 0.3 * BRANCH_CELL) * 0.85 * drop;       // never step past a square that was not looked at
         if (dv >= depth) { break; }
@@ -1922,17 +2064,21 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
       var origin = vec3f(bxz.x, 0.004, bxz.y);        // where to test for shadow: on the heads, unless a branch was touched
       var faces = bedNormal;
       if (touched) {
-        // Which way the branch faces, from how the distance changes a short step in four directions
-        let k = vec2f(1.0, -1.0);
-        let e = 0.0015 + 0.5 * footprint;
-        faces = normalize(k.xyy * branchScene(at + k.xyy * e, share) + k.yyx * branchScene(at + k.yyx * e, share) +
-                          k.yxy * branchScene(at + k.yxy * e, share) + k.xxx * branchScene(at + k.xxx * e, share));
+        // Which way the branch faces, from how the distance changes a short step along each axis
+        // from the distance already known at the point touched
+        let e = 0.0015 + 0.7 * pixelAcross;
+        let here = branchScene(at, share);
+        faces = normalize(vec3f(branchScene(at + vec3f(e, 0.0, 0.0), share), branchScene(at + vec3f(0.0, e, 0.0), share),
+                                branchScene(at + vec3f(0.0, 0.0, e), share)) - here + 1e-6);
         origin = at + faces * 0.004;
       }
-      // Shadow from the branches: a short walk toward the sun, noting how nearly it is blocked
+      // Shadow from the branches: a short walk toward the sun, noting how nearly it is blocked.
+      // (None is needed for a part of a branch that faces away from the sun: it is in its own shade.)
       var open = 1.0;
       var s = 0.012;
-      for (var j = 0; j < 10; j++) {
+      let walk = select(i32(mix(3.0, 7.0, branchNear)), 0, touched && dot(faces, toSun) <= 0.0);
+      if (walk == 0) { open = 0.0; }
+      for (var j = 0; j < walk; j++) {
         let q = origin + toSun * s;
         if (q.y > BRANCH_TOP) { break; }
         let d = branchScene(q, share);
@@ -1975,14 +2121,22 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     let tsWave = refract(-sunDir, waterNormal(vec3f(wave.slope, 0.0), sunDir), WATER_ETA);
     let entry = bed - tsWave * (depth / max(-tsWave.y, 1e-3));
     if (u.h.z > 0.5) { ripple = caustic(wave, sunPath); }
-    sandLight = cloudShadowFromMap(entry);
+    sandLight = 1.0;
+    surfLight = 1.0;
+    if (u.p.x > 0.5) {
+      // Gathered around where the floor's sunlight came in. (Gathering around where the view ray
+      // met the surface instead, some metres away, used to leave out clouds that shade the floor
+      // here and cut their shadows off along straight lines.)
+      let clouds = cloudShadowSites(entry);
+      sandLight = cloudShadowFrom(clouds, entry);
+      surfLight = cloudShadowFrom(clouds, surf);
+    }
+    seaShadowAtSurface = surfLight;
     // Birds overhead shade the bed too (the bed has to be shallow enough for a shadow to show)
     if (depth < 12.0) { sandLight *= birdShadow(entry.xz, entry.y); }
-    surfLight = cloudShadowFromMap(surf);
   }
 
-  // Fish. The view ray crosses the fish sheet somewhere above the bed. Guess the crossing from the
-  // bed depth where the ray lands, then correct it once using the bed depth under the guess.
+  // Fish. The view ray crosses the fish layer somewhere above the bed.
   // The sunlight reaching this patch of bed crossed the sheet too; a fish there casts a shadow,
   // fainter the higher above the bed it is.
   var fish = FishLook(vec3f(0.0), vec3f(0.0), 0.0);
@@ -2002,21 +2156,32 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     var below = depth;                  // and one that is below it
     let guess = fishSheetDepth(fishFloor(surf.xz + slide * depth));
     fishDepth = min(guess, depth);
-    for (var i = 0; i < 4; i++) {
+    // The size of the miss at each end of the stretch still being searched, once known. With both
+    // known, the next try goes where a straight line between them crosses zero, which lands much
+    // nearer than the halfway point does and usually ends the search a step sooner.
+    var gapAbove = 0.0;
+    var gapBelow = 0.0;
+    for (var i = 0; i < 3; i++) {
       let gap = fishSheetDepth(fishFloor(surf.xz + slide * fishDepth)) - fishDepth;      // positive while the ray is above the layer
-      if (abs(gap) < 0.02) { break; }
-      if (gap > 0.0) { above = fishDepth; } else { below = fishDepth; }
-      fishDepth = 0.5 * (above + below);
+      if (abs(gap) < 0.03) { break; }
+      if (gap > 0.0) { above = fishDepth; gapAbove = gap; } else { below = fishDepth; gapBelow = gap; }
+      var share = 0.5;
+      if (gapAbove > 0.0 && gapBelow < 0.0) { share = clamp(gapAbove / (gapAbove - gapBelow), 0.1, 0.9); }
+      fishDepth = mix(above, below, share);
     }
     if (fishDepth > 0.15) {
       fish = fishAt(surf.xz + slide * fishDepth, footprint, t, ts);
       let bedXZ = surf.xz + t.xz * viewPath;
       let above = depth - guess;                                   // height of the sheet over this patch of bed
-      // The shadow is the fish as the sun sees it, so it is tested along the sun's ray
-      let overhead = fishAt(bedXZ - ts.xz * (above / max(-ts.y, 1e-3)), footprint, ts, ts);
       // Close to the bed, fish share its cloud shadow and caustics; higher up, just the cloud shadow
       fishLight = mix(surfLight, sandLight * ripple, exp(-above));
-      sandLight *= 1.0 - 0.7 * overhead.cover * exp(-above / 3.0);
+      // The shadow is the fish as the sun sees it, so it is tested along the sun's ray. It is only
+      // looked for where the fish are within 7 m of the bed; from higher it has faded to under a
+      // tenth of its strength and is not worth the search.
+      if (above < 7.0) {
+        let overhead = fishAt(bedXZ - ts.xz * (above / max(-ts.y, 1e-3)), footprint, ts, ts);
+        sandLight *= 1.0 - 0.7 * overhead.cover * exp(-above / 3.0);
+      }
     }
   }
 
@@ -2130,7 +2295,8 @@ fn shadeWater(ro : vec3f, rd : vec3f, tPlane : f32, hazeCol : vec3f) -> vec3f {
   let up = vec3f(0.0, 1.0, 0.0);
   let v = -rd;
   // Metres of water surface covered by one pixel here, stretched along the view at shallow angles
-  let footprint = tPlane / (u.b.w * u.a.y) / max(-rd.y, 0.02);
+  let footprint = tPlane / (u.b.w * u.a.y) / max(-rd.y, 0.02) * pixelScale;
+  pixelAcross = tPlane / (u.b.w * u.a.y) * pixelScale;
 
   // With the height march on, find where this ray really meets the waves and shade that point;
   // otherwise shade the mean level and let the waves live only in the normal.
@@ -2140,13 +2306,14 @@ fn shadeWater(ro : vec3f, rd : vec3f, tPlane : f32, hazeCol : vec3f) -> vec3f {
   }
   let surf = ro + rd * dist;
 
-  let vis = cloudShadowFromMap(surf);
+  seaShadowAtSurface = 1.0;
   let field = waveField(surf.xz, footprint, WAVE_COUNT, false);
   let wave = vec3f(field.slope, field.lost);
   let wn = waterNormal(wave, v);
   // Bend the view ray into the water; the part of it that is not reflected sees the water body
   let viewFresnel = WATER_F0 + (1.0 - WATER_F0) * pow(1.0 - max(dot(wn, v), 0.0), 5.0);
   let body = (1.0 - viewFresnel) * waterBody(surf, refract(rd, wn, WATER_ETA), true, footprint);
+  let vis = seaShadowAtSurface;       // the cloud shadow at the surface, which waterBody has just worked out
   // The reflected part sees sky here; the clouds' reflection is added by the cloud pass
   let mirror = reflectionBackdrop(reflect(rd, wn), surf.xz);
   var col = surfaceLight(wn, v, vec3f(0.0), waterRough(wave.z), WATER_F0, vis, mirror) + body;
@@ -2966,6 +3133,7 @@ fn birdsAlong(ro : vec3f, rd : vec3f, tSea : f32) -> BirdLook {
   // A grid cell is a column several metres wide. Check the four columns nearest each of a series
   // of points along the ray, spaced a little closer than a column is wide.
   let samples = clamp(i32(ceil((hi - lo) * length(rd.xz) / (0.85 * BIRD_CELL_SIZE))), 1, 16);
+  let reach = (hi - lo) / f32(samples);          // the length of ray each point stands for
   var best = vec4f(0.0);
   var nearest = 1e9;
   for (var n = 0; n < samples; n++) {
@@ -2985,12 +3153,16 @@ fn birdsAlong(ro : vec3f, rd : vec3f, tSea : f32) -> BirdLook {
           flat -= FISH_WORLD * round(flat / FISH_WORLD);
           // From the bird to this point on the ray, in world directions (x, up, z)
           let d = vec3f(flat.x, here.y - BIRD_HEIGHT - bird.lift, flat.y);
+          // Skip birds this ray passes nowhere near. Most birds looked at fail this, so it is done
+          // first, before the bird's own frame (which takes some trigonometry) is worked out.
+          let alongRay = dot(d, rd);
+          if (dot(d, d) - alongRay * alongRay > 1.3) { continue; }
+          // A bird near the ray turns up at several of the points along it. Test it only at the one
+          // nearest to where the ray passes it, or the same costly test would be repeated at each.
+          if (abs(alongRay) > 0.5 * reach + 0.01) { continue; }
           let frame = birdFrame(bird);
           let o = vec3f(dot(d, frame.ahead), dot(d, frame.left), dot(d, frame.top));
           let dir = vec3f(dot(rd, frame.ahead), dot(rd, frame.left), dot(rd, frame.top));
-          // Skip birds this ray passes nowhere near
-          let past = o - dir * dot(o, dir);
-          if (dot(past, past) > 1.3) { continue; }
 
           let footprint = max(tm + dot(-o, dir), 0.1) / (u.b.w * u.a.y);      // metres per pixel at the bird
           // Fade out birds only a few pixels across, and those near the limit of sight
@@ -3036,6 +3208,7 @@ fn birdShadow(mapXZ : vec2f, y : f32) -> f32 {
   let hi = min(BIRD_HEIGHT + reachUp - y, 9.0) / sun.y;
   if (hi <= lo) { return 1.0; }
   let samples = clamp(i32(ceil((hi - lo) * length(sun.xz) / (0.85 * BIRD_CELL_SIZE))), 1, 4);
+  let reach = (hi - lo) / f32(samples);
   var light = 1.0;
   for (var n = 0; n < samples; n++) {
     let tm = mix(lo, hi, (f32(n) + 0.5) / f32(samples));
@@ -3052,11 +3225,12 @@ fn birdShadow(mapXZ : vec2f, y : f32) -> f32 {
           var flat = p - bird.pos;
           flat -= FISH_WORLD * round(flat / FISH_WORLD);
           let d = vec3f(flat.x, y + sun.y * tm - BIRD_HEIGHT - bird.lift, flat.y);
+          let alongRay = dot(d, sun);
+          if (dot(d, d) - alongRay * alongRay > 1.3) { continue; }
+          if (abs(alongRay) > 0.5 * reach + 0.01) { continue; }          // tested at the nearest point only, as for the view
           let frame = birdFrame(bird);
           let o = vec3f(dot(d, frame.ahead), dot(d, frame.left), dot(d, frame.top));
           let dir = vec3f(dot(sun, frame.ahead), dot(sun, frame.left), dot(sun, frame.top));
-          let past = o - dir * dot(o, dir);
-          if (dot(past, past) > 1.3) { continue; }
           let blur = 0.0047 * max(tm + dot(-o, dir), 0.0) + 0.01;      // metres of soft edge
           // (the blur stands in for the pixel size, and the shading of the feathers is skipped)
           let hit = birdShape(o, dir, bird, frame.ahead.y, clamp(blur / (0.045 * bird.size), 0.05, 0.9), blur, vec3f(0.0), false);
@@ -3077,7 +3251,8 @@ fn birdShadow(mapXZ : vec2f, y : f32) -> f32 {
 fn fs_final(@builtin(position) frag : vec4f) -> @location(0) vec4f {
   let ro = u.b.xyz;
   let rd = viewRay(frag.xy);
-  let scene = backdrop(ro, rd);
+  viewFocus = u.v.w * (1.0 - smoothstep(0.08, 0.32, abs(frag.y / u.a.y - 0.5)));
+  let scene = backdrop(frag.xy, ro, rd);
   let bird = birdsAlong(ro, rd, waterHit(ro, rd).t);
   // The cloud buffer is stretched up to the screen with ordinary smooth filtering
   let uv = frag.xy / u.a.xy;
@@ -3705,7 +3880,15 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     readOnly(7),                                                              // the predators
     readOnly(8), readOnly(9),                                                 // the birds and their grid
     { binding: 10, visibility: FRAG, texture: { sampleType: 'float' } },     // how near the clouds' front face is
-    { binding: 11, visibility: FRAG, texture: { sampleType: 'float' } }      // the seabed cache
+    { binding: 11, visibility: FRAG, texture: { sampleType: 'float' } },     // the seabed cache
+    { binding: 12, visibility: FRAG, texture: { sampleType: 'float' } }      // the sea, from its own lower-resolution pass
+  ]});
+  // The sea pass reads everything the final pass does except its own output
+  const seaBGL = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: FRAG, texture: { sampleType: 'float' } },
+    { binding: 1, visibility: FRAG, sampler: { type: 'filtering' } },
+    readOnly(3), readOnly(4), readOnly(5), readOnly(6), readOnly(7), readOnly(8), readOnly(9),
+    { binding: 11, visibility: FRAG, texture: { sampleType: 'float' } }
   ]});
   const fullScreenPipeline = (groupLayouts, entryPoint, targetFormat) => device.createRenderPipeline({
     layout: device.createPipelineLayout({ bindGroupLayouts: groupLayouts }),
@@ -3728,6 +3911,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     fragment: { module, entryPoint: 'fs_cloud', targets: [{ format: CLOUD_FORMAT }, { format: SHADOW_FORMAT }] }
   });
   const finalPipeline = fullScreenPipeline([uniformBGL, finalBGL], 'fs_final', format);
+  const seaPipeline = fullScreenPipeline([uniformBGL, seaBGL], 'fs_sea', CLOUD_FORMAT);
   const linearSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
 
   // Flocking simulations. Each flock has two copies of its members, so a step reads one and writes
@@ -3859,7 +4043,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     gSpace: v => (+v).toFixed(1) + ' m', gSeparate: v => (+v).toFixed(1), gAlign: v => (+v).toFixed(2), gAlignRange: v => v + ' m',
     gCohere: v => (+v).toFixed(2), gCohereRange: v => v + ' m', gRestless: v => (+v).toFixed(1), gSwoop: v => Math.round(v * 100) + '%',
     gLures: v => v, gLurePull: v => (+v).toFixed(1), gLureRange: v => v + ' m', gLureLife: v => v + ' s', gBlind: v => v + '°',
-    steps: v => v, scale: v => Math.round(v * 100) + '%', scene: v => Math.round(v * 100) + '%' + (+v > 1 ? ' (' + (v * v).toFixed(1).replace('.0', '') + '× supersampled)' : '')
+    steps: v => v, scale: v => Math.round(v * 100) + '%', seaRes: v => Math.round(v * 100) + '%', scene: v => Math.round(v * 100) + '%' + (+v > 1 ? ' (' + (v * v).toFixed(1).replace('.0', '') + '× supersampled)' : '')
   };
   const P = {};
   for (const id of Object.keys(fmt)) {
@@ -3867,8 +4051,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     const sync = () => { P[id] = parseFloat(el.value); out.textContent = fmt[id](el.value); };
     el.addEventListener('input', () => {
       sync();
-      if (id === 'scene') sceneNow = P.scene;       // moving the slider restarts the automatic adjustment from the new ceiling
-      if (id === 'scale' || id === 'scene') resize();
+      if (id === 'scene') { sceneNow = P.scene; governor.climbing = false; }      // moving the slider restarts the automatic adjustment from the new ceiling
+      if (id === 'scale' || id === 'scene' || id === 'seaRes') resize();
     });
     sync();
   }
@@ -3899,6 +4083,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   const coralOn = document.getElementById('coralOn');
   const wavesOn = document.getElementById('wavesOn');
   const bedOn = document.getElementById('bedOn');
+  const sandOn = document.getElementById('sandOn');
+  const coralFocus = document.getElementById('coralFocus');
   const bedCache = document.getElementById('bedCache');
   const holdFps = document.getElementById('holdFps');
   const showLures = document.getElementById('showLures');
@@ -3997,20 +4183,46 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
 
   // Render targets, rebuilt when the canvas or the cloud resolution changes. The sea and sky are
   // drawn straight to the canvas; the clouds and the cloud shadow map get smaller buffers of their own.
-  let targets = [], cloudView, cloudNearView, shadowView, cloudBGs, finalBGs;
-  let lowW = 1, lowH = 1, shadowSize = 64, sized = { dpr: 0, w: 0, h: 0 };
+  let targets = [], cloudView, cloudNearView, shadowView, seaView, cloudBGs, finalBGs, seaBGs;
+  let lowW = 1, lowH = 1, seaW = 1, seaH = 1, shadowSize = 64, sized = { dpr: 0, w: 0, h: 0 };
 
   // Holding 60 frames a second. The Scene resolution slider sets the ceiling; sceneNow is the
   // resolution actually in use, which the governor below lowers when frames come too slowly and
   // raises again when there is room. Work per frame is roughly proportional to the number of
   // pixels, which goes as the square of the resolution, so the correction uses a square root.
+  // It starts low and climbs. Starting at full resolution and backing off means that a machine
+  // which cannot manage it opens on its worst few seconds: a stutter, then a visible drop. Starting
+  // at half and climbing while the frame rate holds means every machine opens smoothly, and a fast
+  // one sharpens to full within a second or two. The resolution a machine settles at is also
+  // remembered (in the browser's storage for this page), and the next visit starts just under it.
+  const REMEMBER = 'scene-resolution';
+  let remembered = 0;
+  try { remembered = parseFloat(localStorage.getItem(REMEMBER)) || 0; } catch (err) { /* no storage: start from half */ }
   let sceneNow = P.scene;
-  const governor = { settle: 2, probing: false, lastProbe: 0, probeWait: 2000 };
-  // Called about twice a second with the measured frame rate. Returns the resolution to use.
+  if (document.getElementById('holdFps').checked) {
+    sceneNow = Math.max(0.25, Math.min(P.scene, remembered > 0 ? remembered * 0.85 : P.scene * 0.5));
+  }
+  const governor = { settle: 2, probing: false, lastProbe: 0, probeWait: 2000, climbing: sceneNow < P.scene, steady: 0 };
+  // Called with the measured frame rate: four times a second during the opening climb, twice a
+  // second after it. Returns the resolution to use.
   function govern(fps, now, current, ceiling) {
     if (governor.settle > 0) { governor.settle--; return current; }      // ignore the reading right after a change
     let next = current;
-    if (fps < 57) {
+    if (governor.climbing) {
+      // The opening climb: while the frame rate holds, take big steps up (each 1.3 times the
+      // resolution, so about 1.7 times the pixels). The first reading that falls short ends the
+      // climb: step back down by what that reading says, and carry on cautiously from there.
+      if (fps < 57) {
+        governor.climbing = false;
+        governor.lastProbe = now;
+        governor.probeWait = 4000;
+        next = current * Math.max(0.6, Math.sqrt(fps / 60)) * 0.95;
+      } else if (current >= ceiling) {
+        governor.climbing = false;
+      } else {
+        next = current * 1.3;
+      }
+    } else if (fps < 57) {
       // Too slow. If this follows a trial increase, wait twice as long before trying one again.
       if (governor.probing) governor.probeWait = Math.min(governor.probeWait * 2, 30000);
       governor.probing = false;
@@ -4031,7 +4243,15 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       governor.probeWait = Math.max(2000, governor.probeWait * 0.8);
     }
     next = Math.max(0.25, Math.min(ceiling, next));
-    if (Math.abs(next - current) < 0.02 * current) return current;        // not worth rebuilding the buffers for
+    if (Math.abs(next - current) < 0.02 * current) {                     // not worth rebuilding the buffers for
+      // Once it has held one resolution for a few seconds, remember it for the next visit
+      governor.steady++;
+      if (governor.steady === 8) {
+        try { localStorage.setItem(REMEMBER, String(current)); } catch (err) { /* no storage: nothing to remember */ }
+      }
+      return current;
+    }
+    governor.steady = 0;
     governor.settle = 1;
     return next;
   }
@@ -4046,6 +4266,9 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     canvas.height = Math.max(1, Math.min(max, Math.round(sized.h * density)));
     lowW = Math.max(1, Math.round(canvas.width * P.scale));
     lowH = Math.max(1, Math.round(canvas.height * P.scale));
+    // The sea's own buffer. At 100% it is not used: the final pass works the sea out directly.
+    seaW = P.seaRes >= 1 ? canvas.width : Math.max(1, Math.round(canvas.width * P.seaRes));
+    seaH = P.seaRes >= 1 ? canvas.height : Math.max(1, Math.round(canvas.height * P.seaRes));
     shadowSize = Math.max(64, Math.round(512 * P.scale));
 
     for (const t of targets) t.destroy();
@@ -4059,6 +4282,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     cloudView = make([lowW, lowH], CLOUD_FORMAT);
     cloudNearView = make([lowW, lowH], SHADOW_FORMAT);
     shadowView = make([shadowSize, shadowSize], SHADOW_FORMAT);
+    seaView = make(P.seaRes >= 1 ? [1, 1] : [seaW, seaH], CLOUD_FORMAT);
 
     // One set of bind groups per copy of the flocks, so drawing can follow whichever is current
     cloudBGs = [0, 1].map(n => device.createBindGroup({ layout: cloudBGL, entries: [
@@ -4082,6 +4306,19 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       { binding: 8, resource: { buffer: birdFlock.members[n] } },
       { binding: 9, resource: { buffer: birdFlock.cells } },
       { binding: 10, resource: cloudNearView },
+      { binding: 11, resource: bedView },
+      { binding: 12, resource: seaView }
+    ]}));
+    seaBGs = [0, 1].map(n => device.createBindGroup({ layout: seaBGL, entries: [
+      { binding: 0, resource: shadowView },
+      { binding: 1, resource: linearSampler },
+      { binding: 3, resource: { buffer: fishFlock.members[n] } },
+      { binding: 4, resource: { buffer: fishFlock.cells } },
+      { binding: 5, resource: { buffer: fishFlock.lures } },
+      { binding: 6, resource: { buffer: fishFlock.lureCells } },
+      { binding: 7, resource: { buffer: fishFlock.predators } },
+      { binding: 8, resource: { buffer: birdFlock.members[n] } },
+      { binding: 9, resource: { buffer: birdFlock.cells } },
       { binding: 11, resource: bedView }
     ]}));
   }
@@ -4145,7 +4382,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     // setting that shapes the bed has changed. Its middle is kept on a whole number of samples, so
     // that the samples land on the same spots after a move and the seabed does not shimmer.
     const wantX = panX + dist * cp * Math.sin(yaw) * 0.3, wantZ = panZ + dist * cp * Math.cos(yaw) * 0.3;
-    const key = [P.depth, P.ocean, P.shoal, P.spacing, P.skew, P.gridTurn, P.relief, P.sand, coralOn.checked ? P.coral : 0, P.coralIn, P.coralOut].join();
+    const key = [P.depth, P.ocean, P.shoal, P.spacing, P.skew, P.gridTurn, P.relief, sandOn.checked ? P.sand : 0, coralOn.checked ? P.coral : 0, P.coralIn, P.coralOut].join();
     const refillBed = bedCache.checked && bedOn.checked &&
       (key !== bedKey || Math.abs(wantX - bedAt.x) > 10 || Math.abs(wantZ - bedAt.z) > 10);
     if (refillBed) {
@@ -4181,7 +4418,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       shadowSize, P.depth, P.relief, P.ocean,
       WATER_Y, mirror.checked ? 1 : 0, P.shoal, waveClock,
       wavesOn.checked ? P.waves : 0, waveMarch.checked ? 1 : 0, caustics.checked ? 1 : 0, whitecaps.checked ? 1 : 0,
-      P.horizon, planetRadius(P.planet), P.spacing, P.sand,
+      P.horizon, planetRadius(P.planet), P.spacing, sandOn.checked ? P.sand : 0,
       e1x, e1z, e2x, e2z,
       e2z / det, -e2x / det, -e1z / det, e1x / det,
       P.fishLift, fish.checked ? 1 : 0, P.fishDepth, showLures.checked ? 1 : 0,
@@ -4194,7 +4431,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       // Coral band. Inward: from a sliver (0.15) to well past the middle of the largest patch, and at
       // the top of the slider no sand middle at all. Outward: how far past the patch's edge it grows.
       P.coralIn >= 1 ? 99 : 0.15 + 2.6 * P.coralIn, 0.5 * P.coralOut, birdShadows.checked ? 1 : 0, featherSheen.checked ? 1 : 0,
-      orbitY, 0, 0, 0
+      orbitY, seaW, seaH, coralFocus.checked ? 1 : 0
     ]);
     device.queue.writeBuffer(ubuf, 0, udata);
 
@@ -4257,6 +4494,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     // Pass 2: ray-march the clouds and their reflections into the low-resolution cloud buffer
     fullScreen([cloudView, cloudNearView], cloudPipeline, cloudBGs[flockNow]);
     // Pass 3: sea and sky at full resolution, clouds laid over them, tonemapped to the canvas
+    if (P.seaRes < 1) fullScreen(seaView, seaPipeline, seaBGs[flockNow]);
     fullScreen(ctx.getCurrentTexture().createView(), finalPipeline, finalBGs[flockNow]);
     flockNow = 1 - flockNow;
 
@@ -4288,9 +4526,9 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     }
 
     frames++;
-    if (now - fpsT > 500) {
+    if (now - fpsT > (governor.climbing && holdFps.checked ? 250 : 500)) {
       const fps = frames * 1000 / (now - fpsT);
-      stats.textContent = Math.round(fps) + ' fps · scene ' + canvas.width + '×' + canvas.height + ' · clouds ' + lowW + '×' + lowH +
+      stats.textContent = Math.round(fps) + ' fps · scene ' + canvas.width + '×' + canvas.height + (P.seaRes < 1 ? ' · sea ' + seaW + '×' + seaH : '') + ' · clouds ' + lowW + '×' + lowH +
         (holdFps.checked && sceneNow < P.scene - 0.005 ? ' · auto ' + Math.round(sceneNow * 100) + '%' : '');
       frames = 0; fpsT = now;
       // A long gap means the tab was hidden or the page stalled, which says nothing about speed
