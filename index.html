@@ -1,3 +1,4 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <!doctype html>
 <html lang="en">
 <head>
@@ -130,17 +131,23 @@
       <input id="fluff" type="range" min="0" max="1.5" step="0.01" value="0.72"></label>
     <label>Planet radius <output id="o-planet"></output>
       <input id="planet" type="range" min="2" max="6.8" step="0.02" value="6.8"></label>
-    <label>Depth under cloud <output id="o-depth"></output>
-      <input id="depth" type="range" min="1" max="60" step="0.5" value="7"></label>
+    <label>Shallowest depth <output id="o-depth"></output>
+      <input id="depth" type="range" min="0.4" max="20" step="0.1" value="0.4"></label>
     <label>Open-ocean depth <output id="o-ocean"></output>
-      <input id="ocean" type="range" min="1" max="80" step="1" value="28"></label>
-    <label>Shoal radius <output id="o-shoal"></output>
-      <input id="shoal" type="range" min="3" max="60" step="1" value="10"></label>
-    <label>Grid spacing <output id="o-spacing"></output>
+      <input id="ocean" type="range" min="1" max="80" step="1" value="29"></label>
+    <label>Shoal size <output id="o-shoal"></output>
+      <input id="shoal" type="range" min="10" max="200" step="5" value="60"></label>
+    <label>Shoal cover <output id="o-shoalCover"></output>
+      <input id="shoalCover" type="range" min="0" max="1" step="0.01" value="0.64"></label>
+    <label>Lagoon depth inside shoals <output id="o-lagoon"></output>
+      <input id="lagoon" type="range" min="0" max="10" step="0.1" value="1.1"></label>
+    <label>Inner shoal spacing <output id="o-ringGap"></output>
+      <input id="ringGap" type="range" min="4" max="80" step="1" value="19"></label>
+    <label>Cloud grid spacing <output id="o-spacing"></output>
       <input id="spacing" type="range" min="20" max="150" step="1" value="20"></label>
-    <label>Grid skew <output id="o-skew"></output>
+    <label>Cloud grid skew <output id="o-skew"></output>
       <input id="skew" type="range" min="60" max="90" step="1" value="60"></label>
-    <label>Grid rotation <output id="o-gridTurn"></output>
+    <label>Cloud grid rotation <output id="o-gridTurn"></output>
       <input id="gridTurn" type="range" min="0" max="90" step="1" value="20"></label>
     <label>Cloud size <output id="o-cloudSize"></output>
       <input id="cloudSize" type="range" min="6" max="30" step="1" value="10"></label>
@@ -168,18 +175,18 @@
       <input id="sand" type="range" min="0" max="1" step="0.01" value="0.6"></label>
     <label>Coral <output id="o-coral"></output>
       <input id="coral" type="range" min="0" max="1" step="0.01" value="0.84"></label>
-    <label>Coral band, inward <output id="o-coralIn"></output>
-      <input id="coralIn" type="range" min="0" max="1" step="0.01" value="0.17"></label>
-    <label>Coral band, outward <output id="o-coralOut"></output>
-      <input id="coralOut" type="range" min="0" max="1" step="0.01" value="0.22"></label>
+    <label>Coral starts at depth <output id="o-coralTop"></output>
+      <input id="coralTop" type="range" min="0" max="15" step="0.1" value="0.8"></label>
+    <label>Coral depth range <output id="o-coralRange"></output>
+      <input id="coralRange" type="range" min="0.2" max="15" step="0.1" value="15"></label>
+    <label>Coral reaches inside the rim <output id="o-coralDots"></output>
+      <input id="coralDots" type="range" min="0" max="12" step="0.25" value="12"></label>
     <label>Coral sway <output id="o-coralSway"></output>
       <input id="coralSway" type="range" min="0" max="1" step="0.01" value="1"></label>
     <label>Coral branches <output id="o-spikes"></output>
       <input id="spikes" type="range" min="0" max="1" step="0.01" value="1"></label>
-    <label>Fish swim depth <output id="o-fishDepth"></output>
-      <input id="fishDepth" type="range" min="0.3" max="6" step="0.1" value="1.5"></label>
-    <label>Fish clearance over bed <output id="o-fishLift"></output>
-      <input id="fishLift" type="range" min="0.02" max="1" step="0.01" value="0.02"></label>
+    <label>Deepest fish swim <output id="o-fishDepth"></output>
+      <input id="fishDepth" type="range" min="0.2" max="6" step="0.1" value="1.5"></label>
     <label>Cloud churn <output id="o-wind"></output>
       <input id="wind" type="range" min="0" max="1" step="0.01" value="0.25"></label>
     <label>March steps <output id="o-steps"></output>
@@ -244,7 +251,7 @@
     <label>Predator speed <output id="o-bPredatorSpeed"></output>
       <input id="bPredatorSpeed" type="range" min="0.2" max="2" step="0.05" value="1.55"></label>
     <label class="check"><input id="showPredators" type="checkbox"> Show predators</label>
-    <label>Caution near shallows <output id="o-bCaution"></output>
+    <label>Caution near walls <output id="o-bCaution"></output>
       <input id="bCaution" type="range" min="0" max="1" step="0.01" value="0.4"></label>
     <label>Personal space <output id="o-bSpace"></output>
       <input id="bSpace" type="range" min="0.15" max="1" step="0.01" value="0.25"></label>
@@ -317,21 +324,22 @@ struct Uniforms {
   c : vec4f,            // sun direction.xyz, coverage
   d : vec4f,            // density scale, fluff, the camera's travel across the map (x and z, in metres)
   e : vec4f,            // coral 0..1, cloud buffer resolution.xy, coral sway 0..1
-  f : vec4f,            // cloud shadow map size, water depth under the cloud in metres, seabed relief 0..1, open-ocean depth in metres
-  g : vec4f,            // water surface height, reflect clouds on/off, shoal radius in metres, wave clock in seconds
+  f : vec4f,            // cloud shadow map size, shallowest water depth in metres (the tops of the shoals), seabed relief 0..1, open-ocean depth in metres
+  g : vec4f,            // water surface height, reflect clouds on/off, shoal size in metres, wave clock in seconds
   h : vec4f,            // wave height 0..1, march to the true wave surface on/off, caustics on/off, whitecaps on/off
   i : vec4f,            // horizon clouds 0..1, planet radius in metres, grid spacing in metres, sand waves 0..1
   j : vec4f,            // the grid's two edge vectors: first.xz, second.xz
   k : vec4f,            // the inverse of those two, for turning a position into grid coordinates
-  l : vec4f,            // least clearance between fish and bed in metres, fish on/off, fish swimming depth in metres, show lures on/off
+  l : vec4f,            // unused, fish on/off, depth of the lowest fish's middle in metres (already limited by the page to clear the shallowest sand), show lures on/off
   m : vec4f,            // show predators on/off, number of predators, fear range in metres, cloud scatter 0..1
   n : vec4f,            // how far the whole field of clouds has drifted across the map (x and z, in metres), wander clock, turnover clock
   o : vec4f,            // cloud turnover amount 0..1, birds on/off, longest wavelength in metres, wave randomness 0..1
   p : vec4f,            // clouds on/off, seabed shape on/off, clouds on a grid on/off, spacing of the scattered clouds' sites in metres
   q : vec4f,            // seabed cache: the map position at its middle (x, z), metres per sample, cache on/off
   r : vec4f,            // distance in metres beyond which clouds are drawn as cheap stand-ins, show home walls on/off, home size in metres, coral spikes 0..1
-  s : vec4f,            // coral band: how far in from a patch's edge the coral reaches before the sand middle starts, how far out past the edge it grows, bird shadows on/off, feather sheen on/off
+  s : vec4f,            // coral depth band: the depth in metres where coral starts, and how many metres further down it carries on, bird shadows on/off, feather sheen on/off
   v : vec4f,            // height of the point the camera orbits, sea buffer resolution.xy, coral detail where you look on/off
+  w : vec4f,            // how far in from the rim coral is scattered onto the shallow sand, in metres across the bed; shoal cover 0..1; depth of the lagoons inside a shoal in metres; metres from one rim to the next one inside it
   // The wave trains, worked out by the page once per frame instead of here once per pixel. Two
   // entries per train: (direction x, direction z, wavenumber, angular speed) and
   // (relative steepness, phase, phase of its backward-running partner, wavelength in metres).
@@ -387,6 +395,7 @@ struct Predator {
 @group(1) @binding(10) var cloudNearTex : texture_2d<f32>;
 // The seabed cache: the bed's shape around the camera, worked out once and stored (see bedLookup)
 @group(1) @binding(11) var bedTex : texture_2d<f32>;
+@group(1) @binding(13) var bedSandTex : texture_2d<f32>;   // the bare sand's depth over the cache window, used only while the cache is being filled
 // The sea, drawn by its own pass into a buffer smaller than the screen (see fs_sea)
 @group(1) @binding(12) var seaTex : texture_2d<f32>;
 // How many screen pixels one pixel of the pass being drawn stands for, along each axis: 1 normally,
@@ -467,7 +476,7 @@ fn fbm(p : vec3f, octaves : i32) -> f32 {
   return sum;
 }
 
-// ---------- the grid: a lattice of sites, each with a shoal below and usually a cloud above ----------
+// ---------- the grid: a lattice of sites, used to place clouds when "Clouds on a grid" is ticked ----------
 // Sites sit at whole-number combinations of two edge vectors (u.j), which makes the grid a field of
 // parallelograms: square, diagonal, triangular or skewed, depending on the sliders. To find the
 // sites near a point, express the point in edge-vector units (u.k is the inverse) and round down:
@@ -1260,42 +1269,50 @@ fn waterRough(lost : f32) -> f32 {
   return min(sqrt(sqrt(base * base * base * base + 2.0 * lost)), 0.6);
 }
 
-// Depth of the bare sand, in metres, at a map position. Every grid site has a shoal: the bed rises along a
-// Gaussian bell toward the site and falls away to the open-ocean depth between sites. The centre
-// site's shoal follows the sliders exactly; the others vary in width and depth, and a few are
-// missing. Fractal noise (the same fbm the cloud uses) then adds bumps, scaled by Seabed relief.
+// Depth of the bare sand, in metres, at a map position. The broad shape is fractal noise (the same
+// fbm the cloud uses): where the noise is low the bed is the open-ocean floor, and as it rises the
+// bed climbs toward the shallowest depth and stops there, which leaves flat-topped shoals of every
+// size and outline. Inside a shoal the bed sinks and rises again in rings (see below). Finer noise
+// then adds bumps to the slopes, scaled by Seabed relief.
 fn sandDepthAt(xz : vec2f) -> f32 {
-  // With the Seabed box unticked the bed is a flat floor, halfway between the depth under the
-  // cloud and the open-ocean depth, and none of the shoals, relief or sand waves below are worked out
+  // With the Seabed box unticked the bed is a flat floor, halfway between the shallowest depth
+  // and the open-ocean depth, and none of the shoals, relief or sand waves below are worked out
   if (u.p.y < 0.5) { return 0.5 * (u.f.y + u.f.w); }
   let ocean = u.f.w;
-  let coord = vec2f(dot(u.k.xy, xz), dot(u.k.zw, xz));
-  let cell = floor(coord + 0.5);
-  // Each bell is cut off smoothly at a distance no site outside the nine nearest can be within,
-  // so adding up just those nine leaves no seams between grid cells
-  let rowGap = abs(u.j.x * u.j.w - u.j.z * u.j.y) / u.i.z;
-  var rise = 0.0;      // how far the surrounding shoals lift the bed above the ocean floor
-  for (var j = -1; j < 2; j++) {
-    for (var i = -1; i < 2; i++) {
-      let c = cell + vec2f(f32(i), f32(j));
-      let site = u.j.xy * c.x + u.j.zw * c.y;
-      var radius = u.g.z;
-      var top = u.f.y;
-      if (any(c != vec2f(0.0))) {
-        let r = siteRandom(c + 50.0);
-        if (r.z < 0.15) { continue; }
-        radius *= mix(0.6, 1.4, r.x);
-        top *= mix(0.8, 2.0, r.y);
-      }
-      let d = length(xz - site);
-      rise += (ocean - top) * exp(-d * d / (2.0 * radius * radius)) * (1.0 - smoothstep(0.85 * rowGap, 1.25 * rowGap, d));
-    }
+  let top = min(u.f.y, ocean);
+  let at = vec3f(xz.x * 0.5 / u.g.z, 5.3, xz.y * 0.5 / u.g.z);
+  let broad = fbm(at, 5);
+  // How far up toward the top the bed is here: 0 on the ocean floor, 1 at the top, and still
+  // counting past 1 further into a shoal. (The Shoal cover setting moves the level of noise that
+  // counts as the top, so more or less of the map gets there.)
+  let climb = (broad - mix(0.66, 0.38, u.w.y)) / 0.12;
+  let up = clamp(climb, 0.0, 1.0);
+  // Squaring makes the climb steep at the bottom and level out as it arrives, so every shoal has
+  // a wide shallow shelf instead of a peak
+  var base = mix(top, ocean, (1.0 - up) * (1.0 - up));
+  // Past the top the bed does not stay flat. Going further into the shoal it sinks again, slowly,
+  // into a lagoon, and then rises steeply back to the top as an inner shoal; further in still,
+  // the same again. So a big shoal is rings within rings, each one a rim round a lagoon.
+  // Each ring is the shoal's own outline moved inward by a fixed distance, so the inner shoals are
+  // smaller copies of the outer one. That needs the distance in from the rim, which is estimated:
+  // how far the noise is past the level of the rim, divided by how fast the noise's broad shape
+  // (its two largest octaves) is changing here. On a steady slope that is exactly the distance.
+  if (climb > 1.0 && u.w.z > 0.0) {
+    let h = 0.04;
+    let here = fbm(at, 2);
+    let slope = vec2f(fbm(at + vec3f(h, 0.0, 0.0), 2), fbm(at + vec3f(0.0, 0.0, h), 2)) - here;
+    // (in noise per metre; the added constant keeps the estimate finite where the noise levels off
+    // at the middle of a shoal)
+    let rate = sqrt(dot(slope, slope) / (h * h) + 0.04) * 0.5 / u.g.z;
+    let inward = (climb - 1.0) * 0.12 / rate;
+    let t = fract(inward / u.w.w);        // how far through the current ring: 0 at its rim
+    base += u.w.z * smoothstep(0.0, 0.8, t) * (1.0 - smoothstep(0.8, 1.0, t));
   }
-  let base = max(ocean - rise, min(ocean, 0.5 * u.f.y));
   let n = fbm(vec3f(xz.x * 0.07, 1.7, xz.y * 0.07), 5);
-  let shape = mix(0.45, -0.8, smoothstep(0.3, 0.7, n));
-  // Relief grows with depth only up to 5 m, so deep water gets a rolling bed instead of cliffs
-  let bumpy = base + u.f.z * shape * min(base, 5.0);
+  let shape = mix(0.45, -0.45, smoothstep(0.3, 0.7, n));
+  // Relief grows with how far the bed is below the top (up to 5 m), so the top itself stays level
+  // and deep water gets a rolling bed instead of cliffs
+  let bumpy = base + u.f.z * shape * min(base - top, 5.0);
 
   // Sand waves: ridges a few metres apart, lying across the direction the water moves. They do not
   // move. Noise bends the crests and makes them fork, and leaves some areas smooth; the second
@@ -1310,30 +1327,65 @@ fn sandDepthAt(xz : vec2f) -> f32 {
 }
 
 // ---------- coral ----------
-// Coral grows where a slice of 3D noise rises above a threshold: a different slice of the same
-// noise that shapes the seabed relief, so the patches are unrelated to the bumps. How far the noise
-// is above the threshold is the "depth into the patch": 0 at the fringe, 1 in the core. That one
-// number drives how tall the coral stands and how it is colored. Its surface is a mass of
-// rounded heads. Coral only grows in shallow water, so patches thin out down the sides of a shoal.
-// Returns depth into the patch in x, the coral's height above the sand in metres in y, and in z
-// how much the spot is the sand-topped middle of a large patch (0 coral, 1 sand).
-fn coralAt(xz : vec2f, waterDepth : f32, footprint : f32) -> vec3f {
-  // Skip the noise entirely where there can be no coral: most of the sea is too deep
-  if (u.e.x <= 0.0 || waterDepth >= 9.0) { return vec3f(0.0); }
+// Coral grows in a band of water depths, the way a real reef does: it starts at one depth and
+// carries on down the side of a shoal to a greatest depth. Below that there is too little light
+// for it. Above it, on the shallow top of a shoal, the bed is bare sand: the coral round the
+// rim takes what the water brings before it gets there. Both ends of the band are settings.
+// Inside the band a slice of 3D noise (a different slice of the same noise that shapes the seabed
+// relief) leaves gaps, so the band is a broken ring instead of a solid one.
+
+// The deepest water coral can grow in, in metres. Nothing about coral is worked out below it.
+fn coralDeepest() -> f32 { return u.s.x + u.s.y; }
+
+// How far into the coral a spot is, from the depth of the bare sand there: 0 at the coral's edge,
+// 1 a little way in, negative outside it. Not stopped at either end.
+// `fromRim` is how far the spot is from the nearest bed deep enough for the band, in metres across
+// the bed (only the seabed cache knows this; anything else passes a huge number).
+fn coralInto(xz : vec2f, sandDepth : f32, fromRim : f32) -> f32 {
+  // The band fades in and out over a fifth of its height at each end (never more than 60 cm)
+  let soft = clamp(0.2 * u.s.y, 0.03, 0.6);
+  let band = smoothstep(u.s.x, u.s.x + soft, sandDepth) * (1.0 - smoothstep(coralDeepest() - soft, coralDeepest(), sandDepth));
   let n = fbm(vec3f(xz.x * 0.34, 23.7, xz.y * 0.34), 4);
-  let shallow = 1.0 - smoothstep(3.5, 9.0, waterDepth);
-  // How far into the patch this spot is: 0 at its edge, 1 a little way in, and still rising
-  // beyond that toward the middle of a big patch
-  let inward = (n - mix(0.62, 0.42, u.e.x)) / 0.16 * shallow;
-  // The coral can also grow outward past the patch's edge by a set amount, which widens the band
-  // of coral without moving where the sand middle begins
-  let core = clamp(inward + u.s.y * shallow, 0.0, 1.0);
+  // (the Coral slider sets how much of the band is filled: all of it at 100%)
+  let ring = ((n - mix(0.75, 0.3, u.e.x)) / 0.16 + 0.4) * band - 0.2 * (1.0 - band);
+  // Inside the rim, on sand shallower than the band, coral carries on as separate clumps that get
+  // smaller and fewer the further in from the rim they are: the way a printed picture fades with dots.
+  if (u.w.x <= 0.0 || sandDepth >= u.s.x + soft || fromRim >= u.w.x) { return ring; }
+  let fade = clamp(1.0 - fromRim / u.w.x, 0.0, 1.0);
+  return max(ring, coralClumps(xz, fade));
+}
+
+// Scattered clumps of coral. The ground is divided into squares with one clump in each, placed off
+// centre. `fade` (0 to 1) sets how big they are and how many squares have one: at 1 most squares
+// have one and neighbours touch, toward 0 only a few small ones are left. Returns how far inside a clump
+// the spot is, on the same scale as coralInto (1 is about 12 cm in), negative outside them all.
+fn coralClumps(xz : vec2f, fade : f32) -> f32 {
+  let g = xz / CLUMP_GRID;
+  let cell = floor(g);
+  var best = -0.2;
+  for (var j = -1; j < 2; j++) {
+    for (var i = -1; i < 2; i++) {
+      let c = cell + vec2f(f32(i), f32(j));
+      let r = siteRandom(c + 310.0);
+      // (each clump has its own cut-off, so they drop out one by one instead of all at once)
+      let radius = CLUMP_GRID * 0.55 * clamp(fade * 1.25 - r.z, 0.0, 1.0);
+      if (radius < 0.06) { continue; }
+      let d = length(g - (c + 0.15 + 0.7 * r.xy)) * CLUMP_GRID;
+      best = max(best, (radius - d) / 0.12);
+    }
+  }
+  return best;
+}
+const CLUMP_GRID : f32 = 0.8;       // metres between neighbouring clumps
+
+// Returns how far into the coral the spot is in x (0 to 1) and the coral's height above the sand
+// in metres in y. (z is always 0: it once marked sand middles inside large patches.)
+fn coralAt(xz : vec2f, waterDepth : f32, footprint : f32, fromRim : f32) -> vec3f {
+  // Skip the noise entirely where there can be no coral: outside the band of depths
+  if (u.e.x <= 0.0 || waterDepth >= coralDeepest() || (waterDepth <= u.s.x && fromRim >= u.w.x)) { return vec3f(0.0); }
+  let core = clamp(coralInto(xz, waterDepth, fromRim), 0.0, 1.0);
   if (core <= 0.0) { return vec3f(0.0); }
-  // The middle of a large patch is not coral but sand: the coral lives in a band round the
-  // outside, and what it has built up over time fills the middle to about its own height. A small
-  // patch never gets far enough in to have a middle, so it is coral all the way across.
-  // (how far in the coral reaches is a setting; at its largest there is no sand middle at all)
-  let middle = smoothstep(u.s.x, u.s.x + 0.25, inward);
+  let middle = 0.0;
   // The coral is a mass of rounded heads packed side by side, each about 34 cm across and standing
   // up to 20 cm above the mass it grows from. They are dropped where a pixel is too coarse to show
   // them. (The branching coral that grows on the heads is far finer than the seabed cache can hold, so it
@@ -1342,12 +1394,12 @@ fn coralAt(xz : vec2f, waterDepth : f32, footprint : f32) -> vec3f {
   let detail = clamp(0.12 / footprint - 0.3, 0.0, 1.0);
   var heads = 0.6;
   if (detail > 0.0) { heads = mix(0.6, coralDomes(xz, BALL_SIZE, 300.0, 0.0), detail); }
-  // In the middle, a level top in place of the heads, at about the height the branching coral
-  // round it reaches
-  let height = core * CORAL_BODY + rise * mix(CORAL_HEAD * heads, CORAL_HEAD + 0.55 * BRANCH_TOP, middle);
-  // Coral cannot grow out of the water. Where it would come within 30 cm of the surface it is
-  // squeezed in under that limit smoothly, so the lumps stay lumps instead of being sliced flat.
-  let room = max(waterDepth - 0.3, 0.05);
+  let height = core * CORAL_BODY + rise * CORAL_HEAD * heads;
+  // Coral cannot grow out of the water, and fish need room to swim over it. Where the coral would
+  // come too near the surface it is squeezed in under a limit smoothly, so the lumps stay lumps
+  // instead of being sliced flat. (The limit is for the smoothed mass; the tops of the heads stand
+  // up to 8 cm above that, and the branches on them are held down separately: see branchRoom.)
+  let room = max(waterDepth - (WATER_OVER_CORAL + 0.08), 0.05);
   return vec3f(core, room * (1.0 - exp(-height / room)), middle);
 }
 const CORAL_BODY : f32 = 0.45;      // metres: height of the mass at the core of a patch, before the heads
@@ -1419,6 +1471,15 @@ fn coralBumps(xz : vec2f) -> vec2f {
 const BRANCH_SIZE : f32 = 0.5;       // metres: the scale of one tree; a full one stands 0.9 of this tall
 const BRANCH_CELL : f32 = 0.24;      // metres between trees: close enough that neighbours' branches reach into each other
 const BRANCH_TOP : f32 = 0.46;       // metres: nothing grows higher than this above the heads
+const WATER_OVER_CORAL : f32 = 0.3;  // metres: no coral, head or branch, comes nearer the surface than this, which leaves room for a fish
+
+// How high the branches may stand at a spot, in metres above the heads, given the depth of the
+// heads' smoothed surface there: their full height where the water allows, less where the heads
+// are near the surface, so the tips stay WATER_OVER_CORAL down. Where there is less room the trees
+// are not cut off; the whole thicket is squashed to fit (see the search in waterBody).
+fn branchRoom(headDepth : f32) -> f32 {
+  return clamp(headDepth - 0.08 - WATER_OVER_CORAL, 0.04, BRANCH_TOP);
+}
 
 fn branchHash(p0 : vec2f) -> f32 {
   var p = fract(p0 * vec2f(123.34, 456.21));
@@ -1533,7 +1594,7 @@ fn depthAt(xz : vec2f, footprint : f32) -> f32 {
 //   r + g : the depth with the coral's heads smoothed over. It is split into a coarse part (a
 //           multiple of 25 cm) and the remainder, because one 16-bit number cannot hold tens of
 //           metres to millimetre accuracy but two can;
-//   b     : how much the spot is the sand-topped middle of a large coral patch (0 to 1);
+//   b     : unused, always 0 (it once marked sand middles inside large coral patches);
 //   a     : how deep into a coral patch the spot is (0 at its edge, negative outside it).
 // The cache holds the broad shape: shoals, relief, sand waves, and where the coral is and how high
 // it stands. The coral's individual heads and spikes are finer than a 6 cm sample can hold, so
@@ -1544,13 +1605,13 @@ struct Bed {
   depth : f32,      // metres of water above the bed
   core : f32,       // depth into a coral patch, 0..1
   head : f32,       // 0 in the creases between coral heads, 1 on top of one
-  middle : f32,     // 1 on the sand-topped middle of a large coral patch, 0 elsewhere
+  middle : f32,     // unused, always 0
 }
 
 // The bed straight from the formulas
 fn bedFromFormulas(xz : vec2f, footprint : f32) -> Bed {
   let sand = sandDepthAt(xz);
-  let coral = coralAt(xz, sand, footprint);
+  let coral = coralAt(xz, sand, footprint, 1e9);     // (outside the cache there are no scattered clumps)
   let rise = min(coral.x * 3.0, 1.0) * CORAL_HEAD;
   return Bed(max(sand - coral.y, 0.05), coral.x, clamp((coral.y - coral.x * CORAL_BODY) / (rise + 1e-4), 0.0, 1.0), coral.z);
 }
@@ -1579,25 +1640,66 @@ fn bedLookup(xz : vec2f, footprint : f32) -> Bed {
   return Bed(mix(exact.depth, cached.depth, trust), mix(exact.core, cached.core, trust), mix(exact.head, cached.head, trust), mix(exact.middle, cached.middle, trust));
 }
 
-// Fills the seabed cache: one pixel of this pass is one sample. It runs the formulas and stores
-// the depth with the coral heads smoothed over.
+// Filling the seabed cache takes two passes. The first (fs_bedSand) works out the depth of the
+// bare sand at every sample. The second (fs_bed) puts the coral on it. It is done in two because
+// the coral scattered inside a rim needs to know how far away the rim is, which means looking at
+// the sand's depth at many other spots: reading those from the first pass's answers costs almost
+// nothing, where working each one out again would multiply the cost of the fill.
+@fragment
+fn fs_bedSand(@builtin(position) frag : vec4f) -> @location(0) vec4f {
+  let sand = sandDepthAt(u.q.xy + (frag.xy - 0.5 * BED_SIZE) * u.q.z);
+  let coarse = floor(sand * 4.0) / 4.0;
+  return vec4f(coarse, sand - coarse, 0.0, 1.0);
+}
+
+// How far a sample of the cache is from the rim, in metres across the bed: the distance to the
+// nearest sample whose sand is deep enough for coral. It looks outward in 16 directions, in steps
+// that grow with distance, as far as the scattered coral reaches and no further.
+fn rimDistance(at : vec2f) -> f32 {
+  let reach = u.w.x / u.q.z;      // in samples
+  var nearest = 1e9;
+  for (var k = 0; k < 16; k++) {
+    let a = (f32(k) + 0.5 * fract(0.5 * (at.x + at.y))) * 0.3927;
+    let dir = vec2f(cos(a), sin(a));
+    var r = 1.0;
+    for (var n = 0; n < 48; n++) {
+      if (r > reach || r >= nearest) { break; }
+      let q = at + dir * r;
+      if (any(q < vec2f(0.0)) || any(q >= vec2f(BED_SIZE))) { break; }
+      let t = textureLoad(bedSandTex, vec2i(q), 0);
+      if (t.r + t.g >= u.s.x) { nearest = r; break; }
+      r = r * 1.15 + 0.5;
+    }
+  }
+  return nearest * u.q.z;
+}
+
+// The second pass: one pixel is one sample. It stores the depth with the coral heads smoothed over.
 @fragment
 fn fs_bed(@builtin(position) frag : vec4f) -> @location(0) vec4f {
   let xz = u.q.xy + (frag.xy - 0.5 * BED_SIZE) * u.q.z;
-  let sand = sandDepthAt(xz);
+  let own = textureLoad(bedSandTex, vec2i(frag.xy), 0);
+  let sand = own.r + own.g;
+  var fromRim = 0.0;
+  if (sand < u.s.x) {
+    fromRim = 1e9;
+    if (u.e.x > 0.0 && u.w.x > 0.0) {
+      fromRim = rimDistance(frag.xy);
+      // Toward the edge of the cache the clumps are thinned away to nothing, because past the edge
+      // there are none: without this they would stop along a straight line.
+      let edge = max(abs(frag.x - 0.5 * BED_SIZE), abs(frag.y - 0.5 * BED_SIZE)) / (0.5 * BED_SIZE);
+      fromRim += u.w.x * smoothstep(0.75, 0.95, edge);
+    }
+  }
   // (a huge pixel size gives the coral with its heads smoothed over)
-  let coral = coralAt(xz, sand, 1e3);
+  let coral = coralAt(xz, sand, 1e3, fromRim);
   let smoothed = max(sand - coral.y, 0.05);
   let coarse = floor(smoothed * 4.0) / 4.0;
   // How deep into a coral patch this spot is, kept going below zero outside the patch instead of
   // stopping at zero. Blending between samples then puts the patch's edge where it really is,
   // between samples; stored stopped at zero, the edge followed the samples and came out in steps.
   var patchDepth = 0.0;
-  if (u.e.x > 0.0 && sand < 9.0) {
-    let n = fbm(vec3f(xz.x * 0.34, 23.7, xz.y * 0.34), 4);
-    let shallow = 1.0 - smoothstep(3.5, 9.0, sand);
-    patchDepth = clamp((n - mix(0.62, 0.42, u.e.x)) / 0.16 * shallow + u.s.y * shallow, -1.0, 1.0);
-  }
+  if (u.e.x > 0.0) { patchDepth = clamp(coralInto(xz, sand, fromRim), -1.0, 1.0); }
   return vec4f(coarse, smoothed - coarse, coral.z, patchDepth);
 }
 
@@ -1738,10 +1840,13 @@ fn hitBentEllipsoid(o : vec3f, d : vec3f, centre : vec3f, radii : vec3f, x0 : f3
 // Each fish is a solid shape, not a drawing on the sheet: a body that is long, tall and thin, the
 // way a fish is (an ellipsoid 40 cm by 14 cm by 7 cm at full size), with an upright tail fin behind
 // it. The body is not rigid: it flexes along its spine as the fish swims and curves when it turns
-// (see spine above). Each fish also swims at its own height, up to 35 cm above the sheet. The ray is tested against those shapes, so looking straight down shows a thin dark back and
+// (see spine above). Each fish also swims at its own height, up to 45 cm above the lowest (less where the layer is too near the surface for that). The ray is tested against those shapes, so looking straight down shows a thin dark back and
 // an edge-on tail, looking from the side shows the tall silver flank, and near fish slide across
 // far ones as the view moves.
-fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f) -> FishLook {
+// `over` is how far above the fish layer the point xz is (0 when it is on the layer). It is above
+// only where the ray was stopped short of the layer by coral standing higher; then only the part
+// of a fish in front of that point can be seen.
+fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f, sheetDepth : f32, over : f32) -> FishLook {
   var look = FishLook(vec3f(0.0), vec3f(0.0), 0.0);
   // Close up, individual fish are drawn. From far off, where a fish would be smaller than a pixel,
   // crowded water shows as a soft dark patch instead, and further still it fades out altogether.
@@ -1778,7 +1883,9 @@ fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f) -> FishLook 
         let speed = length(fish.vel);
         let ahead = fish.vel / max(speed, 1e-4);
         let side = vec2f(-ahead.y, ahead.x);
-        let o = vec3f(dot(d, ahead), dot(d, side), -fish.lift);
+        // (each fish's own height above the sheet is scaled down where the sheet is near the
+        // surface, so that over shallow ground the whole school fits in the water there is)
+        let o = vec3f(dot(d, ahead), dot(d, side), over - fish.lift * clamp((sheetDepth - 0.1) / 0.45, 0.0, 1.0));
         let dir = vec3f(dot(ray.xz, ahead), dot(ray.xz, side), ray.y);
         // The arc it is swimming, as a curvature: turning rate over speed, limited to what a body can do
         let curvature = clamp(fish.turn / max(speed, 0.2), -2.5, 2.5) * 0.5;
@@ -1802,6 +1909,7 @@ fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f) -> FishLook 
         var cover = bodyCover;
         if (tailCover > 0.0 && (bodyCover <= 0.0 || tail.s < body.s)) { hit = tail; cover = tailCover; }
         if (cover <= 0.0 || (look.cover > 0.5 && hit.s > nearest)) { continue; }      // nothing here, or behind a nearer fish
+        if (over > 0.0 && hit.s > 0.0) { continue; }                                  // behind the coral the ray stopped at
         nearest = hit.s;
 
         // Countershading: dark along the back, silver on the flanks, pale underneath
@@ -1868,47 +1976,6 @@ fn predatorMarker(xz : vec2f) -> f32 {
     mark = max(mark, max(1.0 - smoothstep(-0.03, 0.03, arrow), (1.0 - smoothstep(0.02, 0.06, abs(dist - u.m.z))) * 0.6));
   }
   return mark;
-}
-
-// How deep the fish sheet is at a map position, given the bed's depth there: the swimming depth, or
-// the clearance above the bed where that is shallower, with a rounded join between the two.
-fn fishSheetDepth(bedDepth : f32) -> f32 {
-  let flat = u.l.z;
-  // The clearance is measured from the underside of a fish, so half a body's height is added to it
-  let riding = bedDepth - u.l.x - 0.08;
-  let k = 0.4;
-  let h = clamp(0.5 + 0.5 * (riding - flat) / k, 0.0, 1.0);
-  return mix(riding, flat, h) - k * h * (1.0 - h);
-}
-
-// The depth of the top of whatever is on the bed at a map position, for the fish to keep clear of.
-// Over coral this is the level of the tops of the heads, not the surface itself: a fish is longer
-// than a coral head is wide, so it cannot dip into the creases between heads; it has to clear the
-// tops of all of them.
-fn headTops(xz : vec2f) -> f32 {
-  let bed = bedLookup(xz, 1e3);         // a huge pixel size gives the bed with the heads smoothed over, at 0.6 of their height
-  // (the heads stand up to 0.4 of their height above the smoothed surface, and the spikes stand on them)
-  return bed.depth - min(bed.core * 3.0, 1.0) * (0.4 * CORAL_HEAD + BRANCH_TOP * step(0.01, u.r.w)) * (1.0 - bed.middle);
-}
-// The floor the fish layer rides over. Fish rise over coral instead of going round it, and they
-// should start rising before they reach it and come down after, the way a swimming animal would,
-// not jump up at its edge. So the floor at a spot is close to the highest thing anywhere within
-// about 60 cm: nine spots are looked at (here, four at 25 cm, four at 60 cm) and blended with a
-// soft minimum, which leans heavily toward the shallowest of them but changes smoothly as the
-// spot moves, so the layer swells up over a coral patch like a blanket laid across it.
-fn fishFloor(xz : vec2f) -> f32 {
-  // Where the bed here is well below swimming depth, nothing within reach can be tall enough to
-  // lift the layer (coral stands at most 1.1 m), so the surrounding spots need not be looked at
-  let here = headTops(xz);
-  if (here > u.l.z + u.l.x + 1.7) { return here; }
-  let k = 14.0;         // how sharply the shallowest spot dominates
-  // Four spots round this one, 45 cm out. (This reads the coral's smoothed surface plus a fixed
-  // allowance for heads and branches, which changes too gently for more spots to find anything new.)
-  let total = exp(-k * here) + exp(-k * headTops(xz + vec2f(0.32, 0.32))) + exp(-k * headTops(xz + vec2f(-0.32, 0.32)))
-            + exp(-k * headTops(xz + vec2f(0.32, -0.32))) + exp(-k * headTops(xz + vec2f(-0.32, -0.32)));
-  // (Summing, not averaging, makes this come out a little shallower than the shallowest spot
-  // instead of a little deeper, so the roughness of the coral can only add to the fish's clearance.)
-  return -log(total) / k;
 }
 
 // Light coming back up out of the water at surface point surf, along a ray that continues below
@@ -2004,7 +2071,7 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
 
     // Shadows on the bed: climb from this spot back toward the sun along the bent sunlight and
     // check, at a few heights, whether the bed stands higher than the ray there.
-    if (u.e.x > 0.0 && depth < 9.7 && u.p.y > 0.5) {
+    if (u.e.x > 0.0 && depth < coralDeepest() + 0.7 && u.p.y > 0.5) {
       let back = -ts.xz / max(-ts.y, 1e-3);          // sideways travel per metre climbed
       var blocked = 0.0;
       for (var i = 0; i < 4; i++) {
@@ -2050,16 +2117,21 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
       // would change is whether a tree's foot sits a few centimetres into a head or just off it.
       let headShift = depthAt(bxz, 1e3) - depth;
       var inLayer = false;
+      var touchedSquash = 1.0;
       for (var i = 0; i < steps; i++) {
         let q = surf.xz + slide * dv;
-        let height = depthAt(q, 1e3) - headShift - dv;
-        if (height <= 0.0) { break; }
+        let heads = depthAt(q, 1e3);
+        if (heads - headShift - dv <= 0.0) { break; }
+        // Where the heads are near the surface the thicket is squashed to fit under it: heights are
+        // stretched by `squash` before the trees are looked up, so a full tree is found in less room.
+        let squash = BRANCH_TOP / branchRoom(heads);
+        let height = (heads - headShift - dv) * squash;
         // While the ray is still above the layer, nothing can be in its way, so it drops straight
         // to the layer's top (with a margin for the unevenness of the heads)
         if (!inLayer) {
           let over = height - BRANCH_TOP - 0.1;
           if (over > 0.0) {
-            dv += max(over * 0.7, 0.01) * drop;
+            dv += max(over / squash * 0.7, 0.01) * drop;
             if (dv >= depth) { break; }
             continue;
           }
@@ -2068,9 +2140,9 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
         var clear = height - BRANCH_TOP;            // above the layer, a branch is at least this far off
         if (clear < 0.02) {
           clear = branchScene(vec3f(q.x, height, q.y), share);
-          if (clear < 0.0015 + 0.5 * pixelAcross) { touched = true; at = vec3f(q.x, height, q.y); break; }
+          if (clear < 0.0015 + 0.5 * pixelAcross) { touched = true; at = vec3f(q.x, height, q.y); touchedSquash = squash; break; }
         }
-        dv += min(clear, 0.3 * BRANCH_CELL) * 0.85 * drop;       // never step past a square that was not looked at
+        dv += min(clear, 0.3 * BRANCH_CELL) / squash * 0.85 * drop;       // never step past a square that was not looked at
         if (dv >= depth) { break; }
       }
       // (noted now, because the lookups below for shading will overwrite them)
@@ -2107,14 +2179,14 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
       if (touched) {
         // The tree's own color, like a flower on its stalk: dull and dark low down, and strongest
         // and brightest out at the tips
-        let tint = coralColor(kindTouched, shadeTouched) * keepHue(depth - at.y, t, ts);
+        let tint = coralColor(kindTouched, shadeTouched) * keepHue(depth - at.y / touchedSquash, t, ts);
         let bloom = clamp(at.y / (BRANCH_TOP * 0.8), 0.0, 1.0);
         let branchAlbedo = mix(mix(vec3f(0.16, 0.13, 0.10), tint, 0.4), tint * 2.0 + 0.1, bloom * bloom) * hemmed;
         bedAlbedo = mix(bedAlbedo, branchAlbedo, branchShow);
         wrap = 0.6 * branchShow;
         bedNormal = normalize(mix(bedNormal, faces, branchShow));
         bedShade = mix(bedShade, open, branchShow);
-        depth = mix(depth, depth - at.y, branchShow);
+        depth = mix(depth, depth - at.y / touchedSquash, branchShow);
       } else {
         bedAlbedo *= mix(1.0, hemmed, branchShow);
         bedShade *= mix(1.0, open, branchShow);
@@ -2152,8 +2224,10 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     if (depth < 12.0) { sandLight *= birdShadow(entry.xz, entry.y); }
   }
 
-  // Fish. The view ray crosses the fish layer somewhere above the bed.
-  // The sunlight reaching this patch of bed crossed the sheet too; a fish there casts a shadow,
+  // Fish. They swim in a level layer near the surface, which is set (by the page) shallow enough
+  // to clear the shallowest sand anywhere, so no fish is ever in the sand and nothing about the bed
+  // has to be looked up to place them. Coral can stand higher than the layer; fish pass through it.
+  // The sunlight reaching this patch of bed crossed the layer too; a fish there casts a shadow,
   // fainter the higher above the bed it is.
   var fish = FishLook(vec3f(0.0), vec3f(0.0), 0.0);
   var fishDepth = 0.0;
@@ -2161,43 +2235,20 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
   // (Skipped where fish would be too small to draw at all.)
   if (shadowed && u.l.y > 0.5 && footprint < 2.5) {
     let slide = t.xz / max(-t.y, 1e-3);
-    // Find the depth at which the view ray crosses the fish layer. The ray starts above the layer
-    // (at the surface) and ends below it (on the bed), so it crosses somewhere between. The first
-    // guess is the layer's depth over the spot where the ray lands, which is exactly right
-    // wherever the layer is level. Where it is not, such as beside a coral mound that the layer
-    // rises over, that guess can even be deeper than the bed the ray has already hit, which used
-    // to draw fish from on top of the mound onto its side. So the guess is tested, and if the ray
-    // is not on the layer there, the crossing is closed in on by halving.
-    var above = 0.0;                    // a depth along the ray that is still above the layer
-    var below = depth;                  // and one that is below it
-    let guess = fishSheetDepth(fishFloor(surf.xz + slide * depth));
-    fishDepth = min(guess, depth);
-    // The size of the miss at each end of the stretch still being searched, once known. With both
-    // known, the next try goes where a straight line between them crosses zero, which lands much
-    // nearer than the halfway point does and usually ends the search a step sooner.
-    var gapAbove = 0.0;
-    var gapBelow = 0.0;
-    for (var i = 0; i < 3; i++) {
-      let gap = fishSheetDepth(fishFloor(surf.xz + slide * fishDepth)) - fishDepth;      // positive while the ray is above the layer
-      if (abs(gap) < 0.03) { break; }
-      if (gap > 0.0) { above = fishDepth; gapAbove = gap; } else { below = fishDepth; gapBelow = gap; }
-      var share = 0.5;
-      if (gapAbove > 0.0 && gapBelow < 0.0) { share = clamp(gapAbove / (gapAbove - gapBelow), 0.1, 0.9); }
-      fishDepth = mix(above, below, share);
-    }
-    if (fishDepth > 0.15) {
-      fish = fishAt(surf.xz + slide * fishDepth, footprint, t, ts);
+    let layer = u.l.z;                         // depth of the lowest fish's middle
+    // The ray reaches the layer, unless coral stopped it first
+    fishDepth = min(layer, depth);
+    fish = fishAt(surf.xz + slide * fishDepth, footprint, t, ts, layer, layer - fishDepth);
+    let above = depth - layer;                 // height of the layer over this patch of bed
+    // Close to the bed, fish share its cloud shadow and caustics; higher up, just the cloud shadow
+    fishLight = mix(surfLight, sandLight * ripple, exp(-max(above, 0.0)));
+    // The shadow is the fish as the sun sees it, so it is tested along the sun's ray. It is only
+    // looked for where the fish are within 7 m of the bed; from higher it has faded to under a
+    // tenth of its strength and is not worth the search.
+    if (above > 0.0 && above < 7.0) {
       let bedXZ = surf.xz + t.xz * viewPath;
-      let above = depth - guess;                                   // height of the sheet over this patch of bed
-      // Close to the bed, fish share its cloud shadow and caustics; higher up, just the cloud shadow
-      fishLight = mix(surfLight, sandLight * ripple, exp(-above));
-      // The shadow is the fish as the sun sees it, so it is tested along the sun's ray. It is only
-      // looked for where the fish are within 7 m of the bed; from higher it has faded to under a
-      // tenth of its strength and is not worth the search.
-      if (above < 7.0) {
-        let overhead = fishAt(bedXZ - ts.xz * (above / max(-ts.y, 1e-3)), footprint, ts, ts);
-        sandLight *= 1.0 - 0.7 * overhead.cover * exp(-above / 3.0);
-      }
+      let overhead = fishAt(bedXZ - ts.xz * (above / max(-ts.y, 1e-3)), footprint, ts, ts, layer, 0.0);
+      sandLight *= 1.0 - 0.7 * overhead.cover * exp(-above / 3.0);
     }
   }
 
@@ -3324,7 +3375,7 @@ struct Sim {
   d : vec4f,      // home size (m), wall avoidance strength (0 = no walls), restlessness, and for a deep flock swooping 0..1, for a flat one the room predators keep between themselves (m)
   e : vec4f,      // number of lures, lure pull strength, lure range (m), lure lifetime (s)
   f : vec4f,      // number of predators, fear strength, fear range (m), predator lifetime (s)
-  g : vec4f,      // predator speed (m/s), fish swimming depth (m), fish clearance over the bed (m), caution near shallows 0..1
+  g : vec4f,      // predator speed (m/s), fish swimming depth (m), fish clearance over the bed (m), caution near home walls 0..1
   h : vec4f,      // seabed cache: the map position at its middle (x, z), metres per sample, usable 1 or 0
 }
 @group(0) @binding(0) var<uniform> sim : Sim;
@@ -3360,34 +3411,10 @@ struct Predator {
   pad1 : f32,
 }
 @group(0) @binding(6) var<storage, read_write> predators : array<Predator>;
-// The seabed cache, the same texture the drawing shader reads, so that fish can see coral ahead
+// The seabed cache. Fish no longer steer round the bed (they are drawn riding over it instead), so
+// nothing here reads this; it stays declared because the page still binds it.
 @group(0) @binding(7) var bedTex : texture_2d<f32>;
 
-// The depth of the tops of whatever is on the bed at a spot, read from the seabed cache. The fish's
-// world repeats across the sea but the seabed does not, so this looks at whichever copy of the spot
-// is nearest the middle of the cache, which is the copy the camera is looking at. Outside the cache
-// it answers "very deep".
-fn bedTops(pos : vec2f) -> f32 {
-  let near = pos + FISH_WORLD * round((sim.h.xy - pos) / FISH_WORLD);
-  let at = vec2i(floor((near - sim.h.xy) / sim.h.z + 0.5 * BED_SIZE));
-  if (any(at < vec2i(0)) || any(at >= vec2i(i32(BED_SIZE)))) { return 99.0; }
-  let s = textureLoad(bedTex, at, 0);
-  return s.r + s.g - clamp(s.a * 3.0, 0.0, 1.0) * (0.4 * 0.2 + 0.46) * (1.0 - s.b);       // (heads 0.2 m, standing 0.4 of that above the smoothed surface, plus 0.46 m of branching coral; none on a patch's sandy middle)
-}
-// How much a spot is blocked for a fish. Fish rise over coral wherever there is water to rise into,
-// so a spot only blocks them where the bed comes so close to the surface that a fish cannot fit:
-// fully where the tops are within 30 cm of the surface, not at all where they are 45 cm or more down.
-fn blocked(pos : vec2f) -> f32 {
-  return clamp((0.45 - bedTops(pos)) / 0.15, 0.0, 1.0);
-}
-// The same idea with a gentler threshold, for steering: how much a spot is shoaling toward being
-// blocked. It starts rising before the water is actually too shallow, so a fish feels a blocked
-// patch coming from the slope leading up to it. How early is set by the caution setting: at 0 it
-// starts where the tops are 50 cm down, barely before the blocking itself; at 1, 1.1 m down.
-fn shoaling(pos : vec2f) -> f32 {
-  let startDepth = mix(0.5, 1.1, sim.g.w);
-  return clamp((startDepth - bedTops(pos)) / (startDepth - 0.3), 0.0, 1.0);
-}
 const PREDATOR_SENSE : f32 = 10.0;   // metres: how far a predator notices fish
 
 
@@ -3532,18 +3559,17 @@ fn stepBoids(@builtin(global_invocation_id) id : vec3u) {
   if (panic > 40.0) { bolt *= 40.0 / panic; }
   steer += bolt;
 
-  // Shallows and walls. A fish looks ahead (from half a second to about two, by the caution
-  // setting) with three feelers: one straight on and one angled to each side. Each feeler tests the
-  // water halfway along and at its tip, the nearer spot counting double, for two things: how much
-  // the bed is shoaling toward being too shallow to cross, and how close the spot is to a wall of
-  // the fish's home. The fish leans away from whichever side is worse, and if the way straight
-  // ahead is bad it also turns toward the clearer side. Because the feelers reach well ahead and
-  // both signals build up gradually, this starts as a slight lean a couple of seconds out and firms
-  // up only if the fish keeps coming, so it curves away instead of swerving at the last moment.
+  // Walls. A fish looks ahead (from half a second to about two, by the caution setting) with three
+  // feelers: one straight on and one angled to each side. Each feeler tests the water halfway along
+  // and at its tip, the nearer spot counting double, for how close the spot is to a wall of the
+  // fish's home. The fish leans away from whichever side is worse, and if the way straight ahead
+  // is bad it also turns toward the clearer side. Because the feelers reach well ahead and the
+  // signal builds up gradually, this starts as a slight lean a couple of seconds out and firms up
+  // only if the fish keeps coming, so it curves away instead of swerving at the last moment.
   // Like fleeing predators, it is added after the turning limit so nothing else overrides it.
-  let feelShoals = !deep && sim.h.w > 0.5;
+  // (Fish do not steer round shallows or coral at all: they are drawn riding over the bed.)
   let feelWalls = walls > 0.0;
-  if (feelShoals || feelWalls) {
+  if (feelWalls) {
     let reachAhead = 0.4 + mix(0.6, 2.2, sim.g.w) * max(length(me.vel), 0.2);
     let left = vec2f(-flatHeading.y, flatHeading.x);
     let wayL = normalize(flatHeading + left * 0.7);
@@ -3563,7 +3589,6 @@ fn stepBoids(@builtin(global_invocation_id) id : vec3u) {
       var bad = vec3f(0.0);
       for (var s = 0; s < 3; s++) {
         var here = 0.0;
-        if (feelShoals) { here = shoaling(spots[s]); }
         if (feelWalls) {
           let inside = min(spots[s] - penLow, penLow + homeSize - spots[s]);
           // (the Wall avoidance setting scales how much the walls count; 4 is full strength)
@@ -3642,44 +3667,6 @@ fn stepBoids(@builtin(global_invocation_id) id : vec3u) {
     vel = myVel + steer * dt;
     let speed = length(vel);
     vel = select(heading, vel / max(speed, 1e-4), speed > 1e-4) * clamp(speed, sim.c.y * (1.0 - sim.c.z), cruise * (1.0 + sim.c.z));
-    // Coral is solid. Whatever is driving the fish, even a predator behind it, any part of its
-    // motion that heads into coral standing as high as it swims is taken away, so it slides along
-    // the coral's edge instead of into it.
-    // This looks where the fish is actually about to go, which after a shove from a neighbour or a
-    // predator may not be the way it is facing.
-    if (sim.h.w > 0.5) {
-      let next = me.pos + vel.xy / max(length(vel.xy), 1e-4) * 0.25;
-      let ahead = blocked(next);
-      if (ahead > 0.3) {
-        let taller = vec2f(blocked(next + vec2f(0.2, 0.0)) - blocked(next - vec2f(0.2, 0.0)),
-                           blocked(next + vec2f(0.0, 0.2)) - blocked(next - vec2f(0.0, 0.2)));
-        if (dot(taller, taller) > 1e-6) {
-          let way = normalize(taller);
-          vel = vec3f(vel.xy - way * (max(dot(vel.xy, way), 0.0) * smoothstep(0.3, 0.7, ahead)), vel.z);
-        }
-      }
-      // That rule feels for the edge of the impassable ground, and a fast fish can be past the edge
-      // before it is felt: a frightened fish covers 10 cm in a step, and on a steep coral face the
-      // edge is narrower than that. So the step itself is also checked. If it would land the fish
-      // somewhere more blocked than where it is, the fish takes only the part of the step along
-      // whichever map direction stays clear, and if neither does, it turns back. (A fish that is
-      // already somewhere blocked may still move anywhere that is no worse, so it can get out.)
-      if (dt > 0.0) {
-        let limit = max(blocked(me.pos), 0.5);
-        let step = vel.xy * dt;
-        if (blocked(me.pos + step) > limit) {
-          let alongX = blocked(me.pos + vec2f(step.x, 0.0));
-          let alongZ = blocked(me.pos + vec2f(0.0, step.y));
-          if (alongX <= limit && alongX <= alongZ) {
-            vel = vec3f(vel.x, 0.0, vel.z);
-          } else if (alongZ <= limit) {
-            vel = vec3f(0.0, vel.y, vel.z);
-          } else {
-            vel = vec3f(-0.3 * vel.xy, vel.z);
-          }
-        }
-      }
-    }
   }
   var pos = myPos + vel * dt;
   if (walls > 0.0) {
@@ -3938,11 +3925,18 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   const shadowPipeline = fullScreenPipeline([uniformBGL], 'fs_shadow', SHADOW_FORMAT);
   // The seabed cache and the pass that fills it. bedAt is the map position at the cache's middle;
   // bedKey remembers the settings it was filled with, so a change to any of them refills it.
-  const bedPipeline = fullScreenPipeline([uniformBGL], 'fs_bed', CLOUD_FORMAT);
-  const bedView = device.createTexture({
+  // (two passes: the bare sand's depth first, then the coral on it, which reads the first)
+  const bedSandBGL = device.createBindGroupLayout({ entries: [
+    { binding: 13, visibility: FRAG, texture: { sampleType: 'float' } }
+  ]});
+  const bedSandPipeline = fullScreenPipeline([uniformBGL], 'fs_bedSand', CLOUD_FORMAT);
+  const bedPipeline = fullScreenPipeline([uniformBGL, bedSandBGL], 'fs_bed', CLOUD_FORMAT);
+  const bedTexture = () => device.createTexture({
     size: [BED.size, BED.size], format: CLOUD_FORMAT,
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
   }).createView();
+  const bedSandView = bedTexture(), bedView = bedTexture();
+  const bedSandBG = device.createBindGroup({ layout: bedSandBGL, entries: [{ binding: 13, resource: bedSandView }] });
   let bedAt = { x: 0, z: 0 }, bedKey = '';
   // The cloud pass writes two things at once: the clouds, and how near their front face is
   const cloudPipeline = device.createRenderPipeline({
@@ -4046,7 +4040,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   const birdFlock = makeFlock(BIRDS, birdModule, 8, [0.8, 1.2], [0, 7], 30);
   let flockNow = 0;     // which copy holds the flocks as of this frame
 
-  const udata = new Float32Array(80 + 56 * 4);      // the settings, then the table of wave trains
+  const udata = new Float32Array(84 + 56 * 4);      // the settings, then the table of wave trains
   const ubuf = device.createBuffer({ size: udata.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const uniformBG = device.createBindGroup({ layout: uniformBGL, entries: [{ binding: 0, resource: { buffer: ubuf } }] });
 
@@ -4064,9 +4058,9 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   const fmt = {
     elev: v => v + '°', azim: v => v + '°', fov: v => v + '°',
     cover: v => Math.round(v * 100) + '%', dens: v => (+v).toFixed(1),
-    fluff: v => (+v).toFixed(2), depth: v => (+v) + ' m', ocean: v => (+v) + ' m', waves: v => Math.round(v * 100) + '%', waveLength: v => (+v).toFixed(1) + ' m', waveRandom: v => Math.round(v * 100) + '%', horizon: v => Math.round(v * 100) + '%',
+    fluff: v => (+v).toFixed(2), depth: v => (+v).toFixed(1) + ' m', shoalCover: v => Math.round(v * 100) + '%', lagoon: v => (+v <= 0 ? 'none' : (+v).toFixed(1) + ' m'), ringGap: v => (+v) + ' m', ocean: v => (+v) + ' m', waves: v => Math.round(v * 100) + '%', waveLength: v => (+v).toFixed(1) + ' m', waveRandom: v => Math.round(v * 100) + '%', horizon: v => Math.round(v * 100) + '%',
     planet: v => { const r = planetRadius(v); return r >= 6371000 ? 'Earth (6,371 km)' : r >= 1000 ? (r / 1000).toFixed(r < 10000 ? 1 : 0) + ' km' : Math.round(r) + ' m'; },
-    sand: v => Math.round(v * 100) + '%', coral: v => Math.round(v * 100) + '%', spikes: v => Math.round(v * 100) + '%', coralSway: v => Math.round(v * 100) + '%', coralIn: v => (+v >= 1 ? 'whole patch' : Math.round(v * 100) + '%'), coralOut: v => '+' + Math.round(v * 100) + '%', fishLift: v => Math.round(v * 100) + ' cm', fishDepth: v => (+v).toFixed(1) + ' m', shoal: v => (+v) + ' m', spacing: v => (+v) + ' m', gridTurn: v => v + '°',
+    sand: v => Math.round(v * 100) + '%', coral: v => Math.round(v * 100) + '%', spikes: v => Math.round(v * 100) + '%', coralSway: v => Math.round(v * 100) + '%', coralTop: v => (+v).toFixed(1) + ' m', coralRange: v => (+v).toFixed(1) + ' m', coralDots: v => (+v <= 0 ? 'none' : (+v).toFixed(1) + ' m'), fishDepth: v => (+v).toFixed(1) + ' m', shoal: v => (+v) + ' m', spacing: v => (+v) + ' m', gridTurn: v => v + '°',
     cloudSize: v => v + ' m', cloudDetail: v => (+v >= 600 ? 'everywhere' : v + ' m'),
     scatter: v => Math.round(v * 100) + '%', cloudDrift: v => { const sp = driftSpeed(+v); return sp < 1 ? Math.round(sp * 100) + ' cm/s' : sp.toFixed(1) + ' m/s'; },
     driftDir: v => v + '°', wander: v => Math.round(v * 100) + '%', turnover: v => Math.round(v * 100) + '%',
@@ -4136,8 +4130,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   // The opening view: close in over the coral on the shoal beside the first cloud, turned so the
   // cloud is off to the right and the sun's glare on the water is out of frame.
   // HOME is the spot on the map the camera orbits; yaw and pitch are in radians, dist in metres.
-  const HOME = { x: -1.5, z: 6.88 };
-  let yaw = 1.25, pitch = 0.2, dist = 4.2;
+  const HOME = { x: -25.63, z: -36.12 };
+  let yaw = -26.0397, pitch = 0.1647, dist = 4.2;
   const pointers = new Map();
   let pinch = 0;
   canvas.addEventListener('pointerdown', e => {
@@ -4422,7 +4416,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     // setting that shapes the bed has changed. Its middle is kept on a whole number of samples, so
     // that the samples land on the same spots after a move and the seabed does not shimmer.
     const wantX = panX + dist * cp * Math.sin(yaw) * 0.3, wantZ = panZ + dist * cp * Math.cos(yaw) * 0.3;
-    const key = [P.depth, P.ocean, P.shoal, P.spacing, P.skew, P.gridTurn, P.relief, sandOn.checked ? P.sand : 0, coralOn.checked ? P.coral : 0, P.coralIn, P.coralOut].join();
+    const key = [P.depth, P.ocean, P.shoal, P.shoalCover, P.lagoon, P.ringGap, P.relief, sandOn.checked ? P.sand : 0, coralOn.checked ? P.coral : 0, P.coralTop, P.coralRange, P.coralDots].join();
     const refillBed = bedCache.checked && bedOn.checked &&
       (key !== bedKey || Math.abs(wantX - bedAt.x) > 10 || Math.abs(wantZ - bedAt.z) > 10);
     if (refillBed) {
@@ -4445,7 +4439,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
         if (i % 4 === 1 && i < 12) angle = SWELL + (rndA - 0.5) * 0.5;
         const len = wavelength * (0.85 + 0.3 * rndC), k = 2 * Math.PI / len;
         udata.set([Math.cos(angle), Math.sin(angle), k, Math.sqrt(9.81 * k),
-                   0.6 + 0.8 * rndB, rndB * 2 * Math.PI, rndC * 2 * Math.PI, len], 80 + i * 8);
+                   0.6 + 0.8 * rndB, rndB * 2 * Math.PI, rndC * 2 * Math.PI, len], 84 + i * 8);
         wavelength *= 0.87;
       }
     }
@@ -4461,17 +4455,19 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       P.horizon, planetRadius(P.planet), P.spacing, sandOn.checked ? P.sand : 0,
       e1x, e1z, e2x, e2z,
       e2z / det, -e2x / det, -e1z / det, e1x / det,
-      P.fishLift, fish.checked ? 1 : 0, P.fishDepth, showLures.checked ? 1 : 0,
+      // Fish swim no deeper than the setting, and never so deep that the lowest could touch the
+      // shallowest sand: its middle stays 14 cm above it (6 cm of that is half the fish's own height)
+      0, fish.checked ? 1 : 0, Math.max(0.12, Math.min(P.fishDepth, P.depth - 0.14)), showLures.checked ? 1 : 0,
       showPredators.checked ? 1 : 0, P.bPredators, P.bFearRange, P.scatter,
       cloudDriftX, cloudDriftZ, wanderClock, turnoverClock,
       P.turnover, birdsOn.checked ? 1 : 0, P.waveLength, P.waveRandom,
       cloudsOn.checked ? 1 : 0, bedOn.checked ? 1 : 0, cloudGrid.checked ? 1 : 0, P.cloudSize,
       bedAt.x, bedAt.z, BED.texel, bedCache.checked ? 1 : 0,
       P.cloudDetail >= 600 ? 1e9 : P.cloudDetail, showWalls.checked ? 1 : 0, FISH.world / P.bHomes, P.spikes,
-      // Coral band. Inward: from a sliver (0.15) to well past the middle of the largest patch, and at
-      // the top of the slider no sand middle at all. Outward: how far past the patch's edge it grows.
-      P.coralIn >= 1 ? 99 : 0.15 + 2.6 * P.coralIn, 0.5 * P.coralOut, birdShadows.checked ? 1 : 0, featherSheen.checked ? 1 : 0,
-      orbitY, seaW, seaH, coralFocus.checked ? 1 : 0
+      // The band of depths coral grows in: where it starts, and how much further down it goes
+      P.coralTop, P.coralRange, birdShadows.checked ? 1 : 0, featherSheen.checked ? 1 : 0,
+      orbitY, seaW, seaH, coralFocus.checked ? 1 : 0,
+      P.coralDots, P.shoalCover, P.lagoon, P.ringGap
     ]);
     device.queue.writeBuffer(ubuf, 0, udata);
 
@@ -4487,7 +4483,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       FISH.world / P.bHomes, P.bWalls, 0.6, P.bPredatorRoom,    // homes always divide the simulated square exactly; fixed slight restlessness
       P.bLures, P.bLurePull, P.bLureRange, P.bLureLife,
       P.bPredators, P.bFear, P.bFearRange, P.bPredatorLife,
-      P.bPredatorSpeed, P.fishDepth, P.fishLift, P.bCaution,
+      P.bPredatorSpeed, P.fishDepth, 0, P.bCaution,
       // Fish can only avoid coral they can see, which means the cache must be on and filled
       bedAt.x, bedAt.z, BED.texel, bedCache.checked && bedOn.checked && bedKey !== '' ? 1 : 0
     ]);
@@ -4529,7 +4525,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       pass.end();
     };
     // Pass 1: the centre cloud's shadow map, low resolution, looking down the sun direction
-    if (refillBed) fullScreen(bedView, bedPipeline, null);
+    if (refillBed) { fullScreen(bedSandView, bedSandPipeline, null); fullScreen(bedView, bedPipeline, bedSandBG); }
     fullScreen(shadowView, shadowPipeline, null);
     // Pass 2: ray-march the clouds and their reflections into the low-resolution cloud buffer
     fullScreen([cloudView, cloudNearView], cloudPipeline, cloudBGs[flockNow]);
@@ -4583,3 +4579,5 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
 </script>
 </body>
 </html>
+
+</body></html>
