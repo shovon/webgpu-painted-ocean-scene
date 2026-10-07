@@ -143,6 +143,10 @@
       <input id="lagoon" type="range" min="0" max="10" step="0.1" value="1.1"></label>
     <label>Inner shoal spacing <output id="o-ringGap"></output>
       <input id="ringGap" type="range" min="4" max="80" step="1" value="19"></label>
+    <label>Broad dips in the seabed <output id="o-dips"></output>
+      <input id="dips" type="range" min="0" max="6" step="0.1" value="1.2"></label>
+    <label>Size of the broad dips <output id="o-dipSize"></output>
+      <input id="dipSize" type="range" min="50" max="1000" step="10" value="250"></label>
     <label>Cloud grid spacing <output id="o-spacing"></output>
       <input id="spacing" type="range" min="20" max="150" step="1" value="20"></label>
     <label>Cloud grid skew <output id="o-skew"></output>
@@ -185,8 +189,10 @@
       <input id="coralSway" type="range" min="0" max="1" step="0.01" value="1"></label>
     <label>Coral branches <output id="o-spikes"></output>
       <input id="spikes" type="range" min="0" max="1" step="0.01" value="1"></label>
-    <label>Deepest fish swim <output id="o-fishDepth"></output>
+    <label>Fish swim depth <output id="o-fishDepth"></output>
       <input id="fishDepth" type="range" min="0.2" max="6" step="0.1" value="1.5"></label>
+    <label>Fish spread up from that depth <output id="o-fishSpread"></output>
+      <input id="fishSpread" type="range" min="0" max="1" step="0.01" value="0.8"></label>
     <label>Cloud churn <output id="o-wind"></output>
       <input id="wind" type="range" min="0" max="1" step="0.01" value="0.25"></label>
     <label>March steps <output id="o-steps"></output>
@@ -330,7 +336,7 @@ struct Uniforms {
   i : vec4f,            // horizon clouds 0..1, planet radius in metres, grid spacing in metres, sand waves 0..1
   j : vec4f,            // the grid's two edge vectors: first.xz, second.xz
   k : vec4f,            // the inverse of those two, for turning a position into grid coordinates
-  l : vec4f,            // unused, fish on/off, depth of the lowest fish's middle in metres (already limited by the page to clear the shallowest sand), show lures on/off
+  l : vec4f,            // depth of the broad dips in the seabed in metres, fish on/off, the fish's swimming depth over deep water in metres (the depth of the lowest fish's middle), show lures on/off
   m : vec4f,            // show predators on/off, number of predators, fear range in metres, cloud scatter 0..1
   n : vec4f,            // how far the whole field of clouds has drifted across the map (x and z, in metres), wander clock, turnover clock
   o : vec4f,            // cloud turnover amount 0..1, birds on/off, longest wavelength in metres, wave randomness 0..1
@@ -340,6 +346,8 @@ struct Uniforms {
   s : vec4f,            // coral depth band: the depth in metres where coral starts, and how many metres further down it carries on, bird shadows on/off, feather sheen on/off
   v : vec4f,            // height of the point the camera orbits, sea buffer resolution.xy, coral detail where you look on/off
   w : vec4f,            // how far in from the rim coral is scattered onto the shallow sand, in metres across the bed; shoal cover 0..1; depth of the lagoons inside a shoal in metres; metres from one rim to the next one inside it
+  y : vec4f,            // metres across one of the broad dips in the seabed; the share of the water above the fish layer that the fish spread up through, 0..1; two spare
+  x : vec4f,            // the wide map of distance to the nearest coral rim: the map position at its middle (x, z), metres per sample, usable 1 or 0
   // The wave trains, worked out by the page once per frame instead of here once per pixel. Two
   // entries per train: (direction x, direction z, wavenumber, angular speed) and
   // (relative steepness, phase, phase of its backward-running partner, wavelength in metres).
@@ -395,7 +403,8 @@ struct Predator {
 @group(1) @binding(10) var cloudNearTex : texture_2d<f32>;
 // The seabed cache: the bed's shape around the camera, worked out once and stored (see bedLookup)
 @group(1) @binding(11) var bedTex : texture_2d<f32>;
-@group(1) @binding(13) var bedSandTex : texture_2d<f32>;   // the bare sand's depth over the cache window, used only while the cache is being filled
+@group(1) @binding(13) var bedSandTex : texture_2d<f32>;
+@group(1) @binding(14) var farRimTex : texture_2d<f32>;    // distance to the nearest coral rim, in metres, over a wide area at coarse spacing   // the bare sand's depth over the cache window, used only while the cache is being filled
 // The sea, drawn by its own pass into a buffer smaller than the screen (see fs_sea)
 @group(1) @binding(12) var seaTex : texture_2d<f32>;
 // How many screen pixels one pixel of the pass being drawn stands for, along each axis: 1 normally,
@@ -1308,6 +1317,14 @@ fn sandDepthAt(xz : vec2f) -> f32 {
     let t = fract(inward / u.w.w);        // how far through the current ring: 0 at its rim
     base += u.w.z * smoothstep(0.0, 0.8, t) * (1.0 - smoothstep(0.8, 1.0, t));
   }
+  // Broad dips: a much slower noise than the one that shapes the shoals lowers whole stretches of
+  // a shoal by up to a set amount, and leaves others at their full height. It only ever lowers the
+  // bed, so the shallowest depth is still the shallowest, and it fades out down a shoal's outer
+  // slope so the ocean floor is not affected.
+  if (u.l.x > 0.0 && up > 0.0) {
+    let slow = fbm(vec3f(xz.x / u.y.x, 11.9, xz.y / u.y.x), 2) / 0.75;
+    base += u.l.x * up * smoothstep(0.55, 0.9, slow);
+  }
   let n = fbm(vec3f(xz.x * 0.07, 1.7, xz.y * 0.07), 5);
   let shape = mix(0.45, -0.45, smoothstep(0.3, 0.7, n));
   // Relief grows with how far the bed is below the top (up to 5 m), so the top itself stays level
@@ -1340,7 +1357,7 @@ fn coralDeepest() -> f32 { return u.s.x + u.s.y; }
 // How far into the coral a spot is, from the depth of the bare sand there: 0 at the coral's edge,
 // 1 a little way in, negative outside it. Not stopped at either end.
 // `fromRim` is how far the spot is from the nearest bed deep enough for the band, in metres across
-// the bed (only the seabed cache knows this; anything else passes a huge number).
+// the bed (it comes from the seabed cache's own search or from the wide map of rim distances).
 fn coralInto(xz : vec2f, sandDepth : f32, fromRim : f32) -> f32 {
   // The band fades in and out over a fifth of its height at each end (never more than 60 cm)
   let soft = clamp(0.2 * u.s.y, 0.03, 0.6);
@@ -1611,7 +1628,10 @@ struct Bed {
 // The bed straight from the formulas
 fn bedFromFormulas(xz : vec2f, footprint : f32) -> Bed {
   let sand = sandDepthAt(xz);
-  let coral = coralAt(xz, sand, footprint, 1e9);     // (outside the cache there are no scattered clumps)
+  // (the coral scattered inside a rim needs the distance to the rim, which comes from the wide map)
+  var fromRim = 0.0;
+  if (sand < u.s.x) { fromRim = select(1e9, farRim(xz), u.e.x > 0.0 && u.w.x > 0.0); }
+  let coral = coralAt(xz, sand, footprint, fromRim);
   let rise = min(coral.x * 3.0, 1.0) * CORAL_HEAD;
   return Bed(max(sand - coral.y, 0.05), coral.x, clamp((coral.y - coral.x * CORAL_BODY) / (rise + 1e-4), 0.0, 1.0), coral.z);
 }
@@ -1652,11 +1672,12 @@ fn fs_bedSand(@builtin(position) frag : vec4f) -> @location(0) vec4f {
   return vec4f(coarse, sand - coarse, 0.0, 1.0);
 }
 
-// How far a sample of the cache is from the rim, in metres across the bed: the distance to the
-// nearest sample whose sand is deep enough for coral. It looks outward in 16 directions, in steps
-// that grow with distance, as far as the scattered coral reaches and no further.
-fn rimDistance(at : vec2f) -> f32 {
-  let reach = u.w.x / u.q.z;      // in samples
+// How far a sample is from the rim, in metres across the bed: the distance to the nearest sample
+// whose sand is deep enough for coral. It looks outward in 16 directions through a texture of sand
+// depths (samples `texel` metres apart, `size` of them each way), in steps that grow with
+// distance, as far as the scattered coral reaches and no further.
+fn rimDistance(at : vec2f, texel : f32, size : f32) -> f32 {
+  let reach = u.w.x / texel;      // in samples
   var nearest = 1e9;
   for (var k = 0; k < 16; k++) {
     let a = (f32(k) + 0.5 * fract(0.5 * (at.x + at.y))) * 0.3927;
@@ -1665,13 +1686,83 @@ fn rimDistance(at : vec2f) -> f32 {
     for (var n = 0; n < 48; n++) {
       if (r > reach || r >= nearest) { break; }
       let q = at + dir * r;
-      if (any(q < vec2f(0.0)) || any(q >= vec2f(BED_SIZE))) { break; }
+      if (any(q < vec2f(0.0)) || any(q >= vec2f(size))) { break; }
       let t = textureLoad(bedSandTex, vec2i(q), 0);
       if (t.r + t.g >= u.s.x) { nearest = r; break; }
       r = r * 1.15 + 0.5;
     }
   }
-  return nearest * u.q.z;
+  return nearest * texel;
+}
+
+// The coral scattered inside a rim has to be there at any distance, or shoals far from the camera
+// look bare. The seabed cache only reaches about 60 m, so the distance to the rim is also kept for
+// a much wider area, in a second, coarser map (which also holds, in its second number, the depth
+// the fish must stay above: see fishCeiling): one sample every half metre, about 500 m in every
+// direction. That is far too coarse to hold a clump of coral, but the distance to the rim changes
+// slowly, so it holds that well, and the clumps themselves are then worked out from it exactly.
+// It is filled in two passes like the cache: the sand's depth, then the distance.
+@fragment
+fn fs_farSand(@builtin(position) frag : vec4f) -> @location(0) vec4f {
+  let sand = sandDepthAt(u.x.xy + (frag.xy - 0.5 * FAR_SIZE) * u.x.z);
+  let coarse = floor(sand * 4.0) / 4.0;
+  return vec4f(coarse, sand - coarse, 0.0, 1.0);
+}
+@fragment
+fn fs_farRim(@builtin(position) frag : vec4f) -> @location(0) vec4f {
+  let own = textureLoad(bedSandTex, vec2i(frag.xy), 0);
+  var d = 0.0;
+  if (own.r + own.g < u.s.x) { d = min(rimDistance(frag.xy, u.x.z, FAR_SIZE), 500.0); }
+  return vec4f(d, fishCeiling(frag.xy, own.r + own.g), 0.0, 1.0);
+}
+
+// The depth fish must stay above at a sample of the wide map, so that they dive over deep water
+// and come up over a shoal without ever touching sand. It is the sand's depth with every rise
+// spread outward as a gentle ramp: the sand here, or sand nearby plus 70 cm for every metre it is
+// away, whichever is shallowest. So the answer is never deeper than the sand, and it never changes
+// by more than 70 cm in a metre, however steep the sand itself is. That gentleness is what lets
+// fish start rising well before a wall, and it is what makes the layer easy to find along a view
+// ray (a ray cannot cross so gentle a surface twice).
+// (Depths are counted only down to 5.6 m below the shallowest; a ramp from further away than the
+// 8 m looked at here could not come out any shallower than that.)
+const FISH_RAMP : f32 = 0.7;
+fn fishCeiling(at : vec2f, ownSand : f32) -> f32 {
+  let deepest = u.f.y + FISH_RAMP * 16.0 * u.x.z;
+  var best = min(ownSand, deepest);
+  if (best <= u.f.y + 0.01) { return best; }        // already at the shallowest: nothing nearby can lower it
+  let radii = array<f32, 10>(1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0);
+  for (var k = 0; k < 12; k++) {
+    let a = f32(k) * 0.5236;
+    let dir = vec2f(cos(a), sin(a));
+    for (var n = 0; n < 10; n++) {
+      let ramp = FISH_RAMP * radii[n] * u.x.z;
+      if (u.f.y + ramp >= best) { break; }           // nothing this far out could beat what has been found
+      let q = clamp(at + dir * radii[n], vec2f(0.0), vec2f(FAR_SIZE - 1.0));
+      let t = textureLoad(bedSandTex, vec2i(q), 0);
+      best = min(best, t.r + t.g + ramp);
+    }
+  }
+  return best;
+}
+// The depth of the fish layer at a map position: the depth of the lowest fish's middle. It is the
+// swimming depth set on the page, or 14 cm above that ceiling where the ceiling is shallower.
+// Outside the wide map it is the depth that clears the shallowest sand there can be.
+fn fishLayer(xz : vec2f) -> f32 {
+  var ceiling = u.f.y;
+  let at = (xz - u.x.xy) / u.x.z + 0.5 * FAR_SIZE;
+  if (u.x.w > 0.5 && all(at > vec2f(1.0)) && all(at < vec2f(FAR_SIZE - 1.0))) {
+    ceiling = textureSampleLevel(farRimTex, linearSamp, at / FAR_SIZE, 0.0).g;
+  }
+  return max(min(u.l.z, ceiling - 0.14), 0.12);
+}
+// The distance to the nearest rim at a map position, read from that map. Toward the map's edge the
+// answer is pushed up, so the clumps thin away to nothing there instead of stopping along a line.
+fn farRim(xz : vec2f) -> f32 {
+  if (u.x.w < 0.5) { return 1e9; }
+  let at = (xz - u.x.xy) / u.x.z + 0.5 * FAR_SIZE;
+  let edge = max(abs(at.x - 0.5 * FAR_SIZE), abs(at.y - 0.5 * FAR_SIZE)) / (0.5 * FAR_SIZE);
+  if (edge >= 1.0) { return 1e9; }
+  return textureSampleLevel(farRimTex, linearSamp, at / FAR_SIZE, 0.0).r + u.w.x * smoothstep(0.8, 0.97, edge);
 }
 
 // The second pass: one pixel is one sample. It stores the depth with the coral heads smoothed over.
@@ -1683,13 +1774,9 @@ fn fs_bed(@builtin(position) frag : vec4f) -> @location(0) vec4f {
   var fromRim = 0.0;
   if (sand < u.s.x) {
     fromRim = 1e9;
-    if (u.e.x > 0.0 && u.w.x > 0.0) {
-      fromRim = rimDistance(frag.xy);
-      // Toward the edge of the cache the clumps are thinned away to nothing, because past the edge
-      // there are none: without this they would stop along a straight line.
-      let edge = max(abs(frag.x - 0.5 * BED_SIZE), abs(frag.y - 0.5 * BED_SIZE)) / (0.5 * BED_SIZE);
-      fromRim += u.w.x * smoothstep(0.75, 0.95, edge);
-    }
+    // The nearest rim is looked for in the cache's own fine samples, which is exact but cannot see
+    // past the cache's edge; the wide map can, so whichever finds one nearer is believed.
+    if (u.e.x > 0.0 && u.w.x > 0.0) { fromRim = min(rimDistance(frag.xy, u.q.z, BED_SIZE), farRim(xz)); }
   }
   // (a huge pixel size gives the coral with its heads smoothed over)
   let coral = coralAt(xz, sand, 1e3, fromRim);
@@ -1776,6 +1863,7 @@ struct FishLook {
   skyLit : vec3f,
   sunLit : vec3f,
   cover : f32,
+  s : f32,          // how far along the ray from the point asked about the fish drawn is, in metres (negative: before it)
 }
 
 // A ray against an ellipsoid centred on the origin with the given radii. Returns the surface
@@ -1843,11 +1931,22 @@ fn hitBentEllipsoid(o : vec3f, d : vec3f, centre : vec3f, radii : vec3f, x0 : f3
 // (see spine above). Each fish also swims at its own height, up to 45 cm above the lowest (less where the layer is too near the surface for that). The ray is tested against those shapes, so looking straight down shows a thin dark back and
 // an edge-on tail, looking from the side shows the tall silver flank, and near fish slide across
 // far ones as the view moves.
-// `over` is how far above the fish layer the point xz is (0 when it is on the layer). It is above
-// only where the ray was stopped short of the layer by coral standing higher; then only the part
-// of a fish in front of that point can be seen.
-fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f, sheetDepth : f32, over : f32) -> FishLook {
-  var look = FishLook(vec3f(0.0), vec3f(0.0), 0.0);
+// `over` is how far above the fish layer the point xz is (0 when it is on the layer). Only fish
+// within about half a metre of xz on the map are looked at, so a slanted ray through a tall
+// column of fish is asked about at several heights (see waterBody). `limit` is how far along the
+// ray from xz a fish may be and still be seen: it is short where coral stopped the ray.
+// How tall the column of water the fish use is, in metres, where the layer (the lowest fish) is at
+// the given depth. Each fish has a fixed place in the column, from the bottom of it to the top.
+// Over deep water the column is a set share of the water above the layer. Over a shoal, where
+// the layer has risen, there is less water, and the column is squeezed to fit: it never comes
+// nearer the surface than 10 cm.
+fn fishSpread(layer : f32) -> f32 {
+  let room = max(layer - 0.1, 0.0);
+  return min(room, max(0.45, u.y.y * room));
+}
+
+fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f, sheetDepth : f32, over : f32, limit : f32) -> FishLook {
+  var look = FishLook(vec3f(0.0), vec3f(0.0), 0.0, 0.0);
   // Close up, individual fish are drawn. From far off, where a fish would be smaller than a pixel,
   // crowded water shows as a soft dark patch instead, and further still it fades out altogether.
   let sharp = clamp(0.14 / footprint - 0.5, 0.0, 1.0);
@@ -1883,9 +1982,8 @@ fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f, sheetDepth :
         let speed = length(fish.vel);
         let ahead = fish.vel / max(speed, 1e-4);
         let side = vec2f(-ahead.y, ahead.x);
-        // (each fish's own height above the sheet is scaled down where the sheet is near the
-        // surface, so that over shallow ground the whole school fits in the water there is)
-        let o = vec3f(dot(d, ahead), dot(d, side), over - fish.lift * clamp((sheetDepth - 0.1) / 0.45, 0.0, 1.0));
+        // (each fish has its own place in the column of water the school uses: see fishSpread)
+        let o = vec3f(dot(d, ahead), dot(d, side), over - fish.lift / 0.45 * fishSpread(sheetDepth));
         let dir = vec3f(dot(ray.xz, ahead), dot(ray.xz, side), ray.y);
         // The arc it is swimming, as a curvature: turning rate over speed, limited to what a body can do
         let curvature = clamp(fish.turn / max(speed, 0.2), -2.5, 2.5) * 0.5;
@@ -1909,7 +2007,7 @@ fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f, sheetDepth :
         var cover = bodyCover;
         if (tailCover > 0.0 && (bodyCover <= 0.0 || tail.s < body.s)) { hit = tail; cover = tailCover; }
         if (cover <= 0.0 || (look.cover > 0.5 && hit.s > nearest)) { continue; }      // nothing here, or behind a nearer fish
-        if (over > 0.0 && hit.s > 0.0) { continue; }                                  // behind the coral the ray stopped at
+        if (hit.s > limit) { continue; }                                              // behind the coral the ray stopped at
         nearest = hit.s;
 
         // Countershading: dark along the back, silver on the flanks, pale underneath
@@ -1922,13 +2020,13 @@ fn fishAt(xz : vec2f, footprint : f32, ray : vec3f, sunRay : vec3f, sheetDepth :
         let n = vec3f(ahead.x * hit.normal.x + side.x * hit.normal.y, hit.normal.z, ahead.y * hit.normal.x + side.y * hit.normal.y);
         let sunFacing = clamp((dot(n, -sunRay) + 0.3) / 1.3, 0.0, 1.0);
         let glint = pow(max(dot(n, normalize(-sunRay - ray)), 0.0), 40.0) * (1.0 - abs(hit.normal.z)) * 1.5;
-        look = FishLook(albedo, albedo * sunFacing + vec3f(glint), cover * sharp);
+        look = FishLook(albedo, albedo * sunFacing + vec3f(glint), cover * sharp, hit.s);
       }
     }
   }
   if (smudge > 0.0) {
     let cover = clamp(crowd * 0.022, 0.0, 0.45) * smudge;
-    if (cover > look.cover) { look = FishLook(vec3f(0.09, 0.10, 0.13), vec3f(0.09, 0.10, 0.13) * max(-sunRay.y, 0.0), cover); }
+    if (cover > look.cover) { look = FishLook(vec3f(0.09, 0.10, 0.13), vec3f(0.09, 0.10, 0.13) * max(-sunRay.y, 0.0), cover, 0.0); }
   }
   return look;
 }
@@ -2224,30 +2322,67 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     if (depth < 12.0) { sandLight *= birdShadow(entry.xz, entry.y); }
   }
 
-  // Fish. They swim in a level layer near the surface, which is set (by the page) shallow enough
-  // to clear the shallowest sand anywhere, so no fish is ever in the sand and nothing about the bed
-  // has to be looked up to place them. Coral can stand higher than the layer; fish pass through it.
+  // Fish. They swim in a layer that lies at their swimming depth over deep water and rises over
+  // shallow sand to stay clear of it (see fishLayer). Coral can stand higher than the layer; fish
+  // pass through it.
   // The sunlight reaching this patch of bed crossed the layer too; a fish there casts a shadow,
   // fainter the higher above the bed it is.
-  var fish = FishLook(vec3f(0.0), vec3f(0.0), 0.0);
+  var fish = FishLook(vec3f(0.0), vec3f(0.0), 0.0, 0.0);
   var fishDepth = 0.0;
   var fishLight = surfLight;
   // (Skipped where fish would be too small to draw at all.)
   if (shadowed && u.l.y > 0.5 && footprint < 2.5) {
     let slide = t.xz / max(-t.y, 1e-3);
-    let layer = u.l.z;                         // depth of the lowest fish's middle
+    // Find the depth at which the view ray crosses the layer. Going down the ray, "how far the
+    // layer still is below" only ever shrinks, because the layer is too gentle for the ray to
+    // cross it twice, so there is one crossing and a few steps close in on it: each step draws a
+    // straight line through the last two tries and goes where that line says the crossing is.
+    var dPrev = 0.0;
+    var gPrev = fishLayer(surf.xz);             // (the layer's depth below the ray, at the surface)
+    var layer = gPrev;
+    fishDepth = gPrev;
+    for (var i = 0; i < 5; i++) {
+      layer = fishLayer(surf.xz + slide * fishDepth);
+      let g = layer - fishDepth;
+      if (abs(g) < 0.01 || abs(g - gPrev) < 1e-5) { break; }
+      let next = fishDepth - g * (fishDepth - dPrev) / (g - gPrev);
+      dPrev = fishDepth;
+      gPrev = g;
+      fishDepth = clamp(next, 0.0, 8.0);
+    }
     // The ray reaches the layer, unless coral stopped it first
-    fishDepth = min(layer, depth);
-    fish = fishAt(surf.xz + slide * fishDepth, footprint, t, ts, layer, layer - fishDepth);
-    let above = depth - layer;                 // height of the layer over this patch of bed
+    let reached = min(fishDepth, depth);
+    // The fish are spread through a column of water above the layer, and only fish close to a
+    // point on the map are looked at, so a slanted ray is asked about at several heights up the
+    // column: enough that no fish between them is missed, and one when looking straight down.
+    // The nearest fish found by any of them is the one seen.
+    let column = fishSpread(layer);
+    let downRate = max(-t.y, 1e-3);            // metres of depth per metre along the ray
+    let tries = i32(clamp(ceil(column * length(slide) / 0.9) + 1.0, 1.0, 4.0));
+    var nearestFish = 1e9;
+    var seenAt = reached;
+    for (var k = 0; k < tries; k++) {
+      let at = max(reached - column * f32(k) / f32(max(tries - 1, 1)), 0.0);
+      let found = fishAt(surf.xz + slide * at, footprint, t, ts, layer, fishDepth - at, select(1e9, (reached - at) / downRate, depth < fishDepth));
+      let along = at / downRate + found.s;
+      if (found.cover > 0.0 && (fish.cover <= 0.5 || along < nearestFish)) {
+        fish = found;
+        nearestFish = along;
+        seenAt = clamp(along * downRate, 0.05, reached);
+      }
+      if (footprint > 0.28) { break; }         // too far off to draw single fish: once is enough
+    }
+    fishDepth = seenAt;
+    let bedXZ = surf.xz + t.xz * viewPath;
+    let layerOverBed = fishLayer(bedXZ);
+    let above = depth - layerOverBed;          // height of the layer over this patch of bed
     // Close to the bed, fish share its cloud shadow and caustics; higher up, just the cloud shadow
     fishLight = mix(surfLight, sandLight * ripple, exp(-max(above, 0.0)));
     // The shadow is the fish as the sun sees it, so it is tested along the sun's ray. It is only
     // looked for where the fish are within 7 m of the bed; from higher it has faded to under a
     // tenth of its strength and is not worth the search.
     if (above > 0.0 && above < 7.0) {
-      let bedXZ = surf.xz + t.xz * viewPath;
-      let overhead = fishAt(bedXZ - ts.xz * (above / max(-ts.y, 1e-3)), footprint, ts, ts, layer, 0.0);
+      let overhead = fishAt(bedXZ - ts.xz * (above / max(-ts.y, 1e-3)), footprint, ts, ts, layerOverBed, 0.0, 1e9);
       sandLight *= 1.0 - 0.7 * overhead.cover * exp(-above / 3.0);
     }
   }
@@ -3843,6 +3978,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   const BIRDS = { count: 144, world: 96, grid: 12, perCell: 144, depth: 8.75, height: 7.25 };   // height: world height of the middle of their layer (the sea is at -2.5)
   // The seabed cache: a square of size x size samples, texel metres apart, so 123 m across
   const BED = { size: 2048, texel: 0.06 };
+  const FAR = { size: 2048, texel: 0.5 };      // the wide map of distance to the nearest coral rim
   // The simulation shader calls its flock "fish" whichever flock it is compiled for
   const flockHeader = flock =>
     'const FISH_COUNT : u32 = ' + flock.count + 'u;\n' +
@@ -3854,7 +3990,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     'const LURE_MAX : u32 = ' + FISH.lureMax + 'u;\n' +
     'const LURE_GRID : u32 = ' + flock.world + 'u;\n' +      // lures are filed in 1 m cells
     'const PREDATOR_MAX : u32 = ' + FISH.predatorMax + 'u;\n' +
-    'const BED_SIZE : f32 = ' + BED.size.toFixed(1) + ';\n';
+    'const BED_SIZE : f32 = ' + BED.size.toFixed(1) + ';\n' +
+    'const FAR_SIZE : f32 = ' + FAR.size.toFixed(1) + ';\n';
   // The drawing shader needs both flocks' sizes
   const drawHeader = flockHeader(FISH) +
     'const BIRD_COUNT : u32 = ' + BIRDS.count + 'u;\n' +
@@ -3896,7 +4033,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     { binding: 1, visibility: FRAG, sampler: { type: 'filtering' } },
     readOnly(3), readOnly(4),                                                 // the fish and their grid
     readOnly(8), readOnly(9),                                                 // the birds and their grid (for their shadows)
-    { binding: 11, visibility: FRAG, texture: { sampleType: 'float' } }      // the seabed cache
+    { binding: 11, visibility: FRAG, texture: { sampleType: 'float' } },     // the seabed cache
+    { binding: 14, visibility: FRAG, texture: { sampleType: 'float' } }      // the wide map of distance to the coral rim
   ]});
   const finalBGL = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: FRAG, texture: { sampleType: 'float' } },      // cloud shadow map
@@ -3908,14 +4046,16 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     readOnly(8), readOnly(9),                                                 // the birds and their grid
     { binding: 10, visibility: FRAG, texture: { sampleType: 'float' } },     // how near the clouds' front face is
     { binding: 11, visibility: FRAG, texture: { sampleType: 'float' } },     // the seabed cache
-    { binding: 12, visibility: FRAG, texture: { sampleType: 'float' } }      // the sea, from its own lower-resolution pass
+    { binding: 12, visibility: FRAG, texture: { sampleType: 'float' } },     // the sea, from its own lower-resolution pass
+    { binding: 14, visibility: FRAG, texture: { sampleType: 'float' } }      // the wide map of distance to the coral rim
   ]});
   // The sea pass reads everything the final pass does except its own output
   const seaBGL = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: FRAG, texture: { sampleType: 'float' } },
     { binding: 1, visibility: FRAG, sampler: { type: 'filtering' } },
     readOnly(3), readOnly(4), readOnly(5), readOnly(6), readOnly(7), readOnly(8), readOnly(9),
-    { binding: 11, visibility: FRAG, texture: { sampleType: 'float' } }
+    { binding: 11, visibility: FRAG, texture: { sampleType: 'float' } },
+    { binding: 14, visibility: FRAG, texture: { sampleType: 'float' } }      // the wide map of distance to the coral rim
   ]});
   const fullScreenPipeline = (groupLayouts, entryPoint, targetFormat) => device.createRenderPipeline({
     layout: device.createPipelineLayout({ bindGroupLayouts: groupLayouts }),
@@ -3927,16 +4067,30 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   // bedKey remembers the settings it was filled with, so a change to any of them refills it.
   // (two passes: the bare sand's depth first, then the coral on it, which reads the first)
   const bedSandBGL = device.createBindGroupLayout({ entries: [
+    { binding: 1, visibility: FRAG, sampler: { type: 'filtering' } },
+    { binding: 13, visibility: FRAG, texture: { sampleType: 'float' } },
+    { binding: 14, visibility: FRAG, texture: { sampleType: 'float' } }
+  ]});
+  const farRimBGL = device.createBindGroupLayout({ entries: [
     { binding: 13, visibility: FRAG, texture: { sampleType: 'float' } }
   ]});
   const bedSandPipeline = fullScreenPipeline([uniformBGL], 'fs_bedSand', CLOUD_FORMAT);
   const bedPipeline = fullScreenPipeline([uniformBGL, bedSandBGL], 'fs_bed', CLOUD_FORMAT);
-  const bedTexture = () => device.createTexture({
-    size: [BED.size, BED.size], format: CLOUD_FORMAT,
+  const farSandPipeline = fullScreenPipeline([uniformBGL], 'fs_farSand', CLOUD_FORMAT);
+  const farRimPipeline = fullScreenPipeline([uniformBGL, farRimBGL], 'fs_farRim', CLOUD_FORMAT);
+  const bedTexture = n => device.createTexture({
+    size: [n, n], format: CLOUD_FORMAT,
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
   }).createView();
-  const bedSandView = bedTexture(), bedView = bedTexture();
-  const bedSandBG = device.createBindGroup({ layout: bedSandBGL, entries: [{ binding: 13, resource: bedSandView }] });
+  const bedSandView = bedTexture(BED.size), bedView = bedTexture(BED.size);
+  const farSandView = bedTexture(FAR.size), farRimView = bedTexture(FAR.size);
+  const bedFillSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+  const bedSandBG = device.createBindGroup({ layout: bedSandBGL, entries: [
+    { binding: 1, resource: bedFillSampler }, { binding: 13, resource: bedSandView }, { binding: 14, resource: farRimView }
+  ]});
+  const farRimBG = device.createBindGroup({ layout: farRimBGL, entries: [{ binding: 13, resource: farSandView }] });
+  // The wide map is refilled when the camera has travelled 100 m, or a setting that shapes the bed changes
+  let farAt = { x: 0, z: 0 }, farKey = '';
   let bedAt = { x: 0, z: 0 }, bedKey = '';
   // The cloud pass writes two things at once: the clouds, and how near their front face is
   const cloudPipeline = device.createRenderPipeline({
@@ -4040,7 +4194,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   const birdFlock = makeFlock(BIRDS, birdModule, 8, [0.8, 1.2], [0, 7], 30);
   let flockNow = 0;     // which copy holds the flocks as of this frame
 
-  const udata = new Float32Array(84 + 56 * 4);      // the settings, then the table of wave trains
+  const udata = new Float32Array(92 + 56 * 4);      // the settings, then the table of wave trains
   const ubuf = device.createBuffer({ size: udata.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const uniformBG = device.createBindGroup({ layout: uniformBGL, entries: [{ binding: 0, resource: { buffer: ubuf } }] });
 
@@ -4058,7 +4212,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
   const fmt = {
     elev: v => v + '°', azim: v => v + '°', fov: v => v + '°',
     cover: v => Math.round(v * 100) + '%', dens: v => (+v).toFixed(1),
-    fluff: v => (+v).toFixed(2), depth: v => (+v).toFixed(1) + ' m', shoalCover: v => Math.round(v * 100) + '%', lagoon: v => (+v <= 0 ? 'none' : (+v).toFixed(1) + ' m'), ringGap: v => (+v) + ' m', ocean: v => (+v) + ' m', waves: v => Math.round(v * 100) + '%', waveLength: v => (+v).toFixed(1) + ' m', waveRandom: v => Math.round(v * 100) + '%', horizon: v => Math.round(v * 100) + '%',
+    fluff: v => (+v).toFixed(2), depth: v => (+v).toFixed(1) + ' m', shoalCover: v => Math.round(v * 100) + '%', fishSpread: v => Math.round(v * 100) + '%', dips: v => (+v <= 0 ? 'none' : (+v).toFixed(1) + ' m'), dipSize: v => v + ' m', lagoon: v => (+v <= 0 ? 'none' : (+v).toFixed(1) + ' m'), ringGap: v => (+v) + ' m', ocean: v => (+v) + ' m', waves: v => Math.round(v * 100) + '%', waveLength: v => (+v).toFixed(1) + ' m', waveRandom: v => Math.round(v * 100) + '%', horizon: v => Math.round(v * 100) + '%',
     planet: v => { const r = planetRadius(v); return r >= 6371000 ? 'Earth (6,371 km)' : r >= 1000 ? (r / 1000).toFixed(r < 10000 ? 1 : 0) + ' km' : Math.round(r) + ' m'; },
     sand: v => Math.round(v * 100) + '%', coral: v => Math.round(v * 100) + '%', spikes: v => Math.round(v * 100) + '%', coralSway: v => Math.round(v * 100) + '%', coralTop: v => (+v).toFixed(1) + ' m', coralRange: v => (+v).toFixed(1) + ' m', coralDots: v => (+v <= 0 ? 'none' : (+v).toFixed(1) + ' m'), fishDepth: v => (+v).toFixed(1) + ' m', shoal: v => (+v) + ' m', spacing: v => (+v) + ' m', gridTurn: v => v + '°',
     cloudSize: v => v + ' m', cloudDetail: v => (+v >= 600 ? 'everywhere' : v + ' m'),
@@ -4326,7 +4480,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       { binding: 4, resource: { buffer: fishFlock.cells } },
       { binding: 8, resource: { buffer: birdFlock.members[n] } },
       { binding: 9, resource: { buffer: birdFlock.cells } },
-      { binding: 11, resource: bedView }
+      { binding: 11, resource: bedView },
+      { binding: 14, resource: farRimView }
     ]}));
     finalBGs = [0, 1].map(n => device.createBindGroup({ layout: finalBGL, entries: [
       { binding: 0, resource: shadowView },
@@ -4341,7 +4496,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       { binding: 9, resource: { buffer: birdFlock.cells } },
       { binding: 10, resource: cloudNearView },
       { binding: 11, resource: bedView },
-      { binding: 12, resource: seaView }
+      { binding: 12, resource: seaView },
+      { binding: 14, resource: farRimView }
     ]}));
     seaBGs = [0, 1].map(n => device.createBindGroup({ layout: seaBGL, entries: [
       { binding: 0, resource: shadowView },
@@ -4353,7 +4509,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       { binding: 7, resource: { buffer: fishFlock.predators } },
       { binding: 8, resource: { buffer: birdFlock.members[n] } },
       { binding: 9, resource: { buffer: birdFlock.cells } },
-      { binding: 11, resource: bedView }
+      { binding: 11, resource: bedView },
+      { binding: 14, resource: farRimView }
     ]}));
   }
   addEventListener('resize', resize);
@@ -4416,12 +4573,17 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
     // setting that shapes the bed has changed. Its middle is kept on a whole number of samples, so
     // that the samples land on the same spots after a move and the seabed does not shimmer.
     const wantX = panX + dist * cp * Math.sin(yaw) * 0.3, wantZ = panZ + dist * cp * Math.cos(yaw) * 0.3;
-    const key = [P.depth, P.ocean, P.shoal, P.shoalCover, P.lagoon, P.ringGap, P.relief, sandOn.checked ? P.sand : 0, coralOn.checked ? P.coral : 0, P.coralTop, P.coralRange, P.coralDots].join();
+    const key = [P.depth, P.ocean, P.shoal, P.shoalCover, P.lagoon, P.ringGap, P.dips, P.dipSize, P.relief, sandOn.checked ? P.sand : 0, coralOn.checked ? P.coral : 0, P.coralTop, P.coralRange, P.coralDots].join();
     const refillBed = bedCache.checked && bedOn.checked &&
       (key !== bedKey || Math.abs(wantX - bedAt.x) > 10 || Math.abs(wantZ - bedAt.z) > 10);
     if (refillBed) {
       bedAt = { x: Math.round(wantX / BED.texel) * BED.texel, z: Math.round(wantZ / BED.texel) * BED.texel };
       bedKey = key;
+    }
+    const refillFar = bedOn.checked && (key !== farKey || Math.abs(panX - farAt.x) > 100 || Math.abs(panZ - farAt.z) > 100);
+    if (refillFar) {
+      farAt = { x: Math.round(panX / FAR.texel) * FAR.texel, z: Math.round(panZ / FAR.texel) * FAR.texel };
+      farKey = key;
     }
     // The wave trains. Each has a direction, a wavelength and a few fixed random numbers, none of
     // which depend on the pixel, so they are worked out here once per frame and handed to the
@@ -4439,7 +4601,7 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
         if (i % 4 === 1 && i < 12) angle = SWELL + (rndA - 0.5) * 0.5;
         const len = wavelength * (0.85 + 0.3 * rndC), k = 2 * Math.PI / len;
         udata.set([Math.cos(angle), Math.sin(angle), k, Math.sqrt(9.81 * k),
-                   0.6 + 0.8 * rndB, rndB * 2 * Math.PI, rndC * 2 * Math.PI, len], 84 + i * 8);
+                   0.6 + 0.8 * rndB, rndB * 2 * Math.PI, rndC * 2 * Math.PI, len], 92 + i * 8);
         wavelength *= 0.87;
       }
     }
@@ -4455,9 +4617,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       P.horizon, planetRadius(P.planet), P.spacing, sandOn.checked ? P.sand : 0,
       e1x, e1z, e2x, e2z,
       e2z / det, -e2x / det, -e1z / det, e1x / det,
-      // Fish swim no deeper than the setting, and never so deep that the lowest could touch the
-      // shallowest sand: its middle stays 14 cm above it (6 cm of that is half the fish's own height)
-      0, fish.checked ? 1 : 0, Math.max(0.12, Math.min(P.fishDepth, P.depth - 0.14)), showLures.checked ? 1 : 0,
+      // (the fish's swimming depth over deep water; the shader brings them up over shallow sand)
+      P.dips, fish.checked ? 1 : 0, P.fishDepth, showLures.checked ? 1 : 0,
       showPredators.checked ? 1 : 0, P.bPredators, P.bFearRange, P.scatter,
       cloudDriftX, cloudDriftZ, wanderClock, turnoverClock,
       P.turnover, birdsOn.checked ? 1 : 0, P.waveLength, P.waveRandom,
@@ -4467,7 +4628,9 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       // The band of depths coral grows in: where it starts, and how much further down it goes
       P.coralTop, P.coralRange, birdShadows.checked ? 1 : 0, featherSheen.checked ? 1 : 0,
       orbitY, seaW, seaH, coralFocus.checked ? 1 : 0,
-      P.coralDots, P.shoalCover, P.lagoon, P.ringGap
+      P.coralDots, P.shoalCover, P.lagoon, P.ringGap,
+      P.dipSize, P.fishSpread, 0, 0,
+      farAt.x, farAt.z, FAR.texel, bedOn.checked && farKey !== '' ? 1 : 0
     ]);
     device.queue.writeBuffer(ubuf, 0, udata);
 
@@ -4525,6 +4688,8 @@ fn updateLures(@builtin(global_invocation_id) id : vec3u) {
       pass.end();
     };
     // Pass 1: the centre cloud's shadow map, low resolution, looking down the sun direction
+    // (the wide map first: the cache's fill reads it)
+    if (refillFar) { fullScreen(farSandView, farSandPipeline, null); fullScreen(farRimView, farRimPipeline, farRimBG); }
     if (refillBed) { fullScreen(bedSandView, bedSandPipeline, null); fullScreen(bedView, bedPipeline, bedSandBG); }
     fullScreen(shadowView, shadowPipeline, null);
     // Pass 2: ray-march the clouds and their reflections into the low-resolution cloud buffer
