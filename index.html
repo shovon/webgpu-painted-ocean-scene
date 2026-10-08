@@ -176,7 +176,7 @@
     <label>Seabed relief <output id="o-relief"></output>
       <input id="relief" type="range" min="0" max="1" step="0.01" value="1"></label>
     <label>Sand waves <output id="o-sand"></output>
-      <input id="sand" type="range" min="0" max="1" step="0.01" value="0.6"></label>
+      <input id="sand" type="range" min="0" max="1" step="0.01" value="1"></label>
     <label>Coral <output id="o-coral"></output>
       <input id="coral" type="range" min="0" max="1" step="0.01" value="0.84"></label>
     <label>Coral starts at depth <output id="o-coralTop"></output>
@@ -190,9 +190,9 @@
     <label>Coral branches <output id="o-spikes"></output>
       <input id="spikes" type="range" min="0" max="1" step="0.01" value="1"></label>
     <label>Fish swim depth <output id="o-fishDepth"></output>
-      <input id="fishDepth" type="range" min="0.2" max="6" step="0.1" value="1.5"></label>
+      <input id="fishDepth" type="range" min="0.2" max="6" step="0.1" value="6"></label>
     <label>Fish spread up from that depth <output id="o-fishSpread"></output>
-      <input id="fishSpread" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+      <input id="fishSpread" type="range" min="0" max="1" step="0.01" value="1"></label>
     <label>Cloud churn <output id="o-wind"></output>
       <input id="wind" type="range" min="0" max="1" step="0.01" value="0.25"></label>
     <label>March steps <output id="o-steps"></output>
@@ -1340,8 +1340,16 @@ fn sandDepthAt(xz : vec2f) -> f32 {
   let phase = dot(across, xz) * 1.25 + 7.0 * vnoise(vec3f(xz * 0.11, 8.0));
   let patches = smoothstep(0.3, 0.6, vnoise(vec3f(xz * 0.045, 20.0)));
   let ridge = sin(phase) + 0.3 * sin(2.0 * phase + 1.57);
-  return bumpy - u.i.w * 0.3 * patches * ridge * min(base, 5.0) / 5.0;
+  // Sand waves are raised by the current, and the current weakens with depth, so the waves are
+  // tallest in shallow water and die away the deeper the bed lies: their height falls by the same
+  // fraction for every metre down (to 37% at 5 m, 14% at 10 m, nothing to speak of on the ocean
+  // floor). In very shallow water they are held to 7% of the depth, so a ridge cannot stand out
+  // of the water or reach up to where the fish swim.
+  let tall = min(u.i.w * 0.2 * exp(-base / SAND_WAVE_FADE), 0.07 * base);
+  return bumpy - tall * patches * ridge;
 }
+
+const SAND_WAVE_FADE : f32 = 5.0;    // metres of depth over which the sand waves fall to 37% of their height
 
 // ---------- coral ----------
 // Coral grows in a band of water depths, the way a real reef does: it starts at one depth and
@@ -1416,7 +1424,10 @@ fn coralAt(xz : vec2f, waterDepth : f32, footprint : f32, fromRim : f32) -> vec3
   // come too near the surface it is squeezed in under a limit smoothly, so the lumps stay lumps
   // instead of being sliced flat. (The limit is for the smoothed mass; the tops of the heads stand
   // up to 8 cm above that, and the branches on them are held down separately: see branchRoom.)
-  let room = max(waterDepth - (WATER_OVER_CORAL + 0.08), 0.05);
+  // (The heads take at most half of that room, which leaves the other half for the branches that
+  // stand on them. Given all of it, the heads on shallow sand filled the water to the top and the
+  // branches on them were pressed into a film a few centimetres thick.)
+  let room = max(0.5 * (waterDepth - (WATER_OVER_CORAL + 0.08)), 0.05);
   return vec3f(core, room * (1.0 - exp(-height / room)), middle);
 }
 const CORAL_BODY : f32 = 0.45;      // metres: height of the mass at the core of a patch, before the heads
@@ -1488,7 +1499,7 @@ fn coralBumps(xz : vec2f) -> vec2f {
 const BRANCH_SIZE : f32 = 0.5;       // metres: the scale of one tree; a full one stands 0.9 of this tall
 const BRANCH_CELL : f32 = 0.24;      // metres between trees: close enough that neighbours' branches reach into each other
 const BRANCH_TOP : f32 = 0.46;       // metres: nothing grows higher than this above the heads
-const WATER_OVER_CORAL : f32 = 0.3;  // metres: no coral, head or branch, comes nearer the surface than this, which leaves room for a fish
+const WATER_OVER_CORAL : f32 = 0.04; // metres: no coral, head or branch, comes nearer the surface than this. (It was 30 cm, to leave room for a fish, but that squashed coral standing on shallow sand almost flat; fish now pass through coral instead.)
 
 // How high the branches may stand at a spot, in metres above the heads, given the depth of the
 // heads' smoothed surface there: their full height where the water allows, less where the heads
@@ -1547,7 +1558,21 @@ fn branchTree(p0 : vec3f, fork : vec2f, turn : vec2f, thick : f32, bushy : bool)
 //   orange  short thick fingers         red     a low, tight cushion
 //   purple  tall and thin               pink    a full, soft head
 // branchKind and branchShade report the kind and shade of whichever tree was nearest.
+// How far into coral a map position is, read straight from the seabed cache: above zero in coral,
+// below it on bare sand. Outside the cache (or with it off) the answer is -2, meaning "not known".
+// This is what decides whether a tree exists: one stands only where there is coral under its foot.
+fn coralUnder(xz : vec2f) -> f32 {
+  let at = (xz - u.q.xy) / u.q.z + 0.5 * BED_SIZE;
+  let inside = min(min(at.x, at.y), BED_SIZE - max(at.x, at.y));
+  if (u.q.w < 0.5 || inside < 34.0) { return -2.0; }
+  return textureSampleLevel(bedTex, linearSamp, at / BED_SIZE, 0.0).a;
+}
 var<private> branchKind : i32 = 0;
+// How much narrower than full size the trees are drawn (1 is full size). Where the water over the
+// heads is shallow the thicket is squashed down to fit, and a tree squashed flat but left at its
+// full width would be a wide pancake, so it is narrowed as well (by much less than it is squashed, so that the trees still cover the heads).
+// Set by whoever is about to ask branchScene about a spot.
+var<private> branchNarrow : f32 = 1.0;
 var<private> branchShade : f32 = 0.5;
 fn branchScene(p : vec3f, share : f32) -> f32 {
   // by kind:                     brown yellow orange red   purple pink
@@ -1575,16 +1600,26 @@ fn branchScene(p : vec3f, share : f32) -> f32 {
       let centre = (c + 0.5 + (vec2f(r1, r2) - 0.5) * 0.3) * BRANCH_CELL;
       let kind = coralKind(branchHash(c + 71.9));
       let size = BRANCH_SIZE * (0.7 + 0.3 * r2) * sizeOf[kind];
-      let at = p.xz - centre - slide * swayOf[kind];
+      let at = (p.xz - centre - slide * swayOf[kind]) / branchNarrow;
       let local = vec3f(at.x, p.y, at.y) / size;
       var dt = length(local - vec3f(0.0, 0.43, 0.0)) - 0.7;
       if (dt <= 0.25) {
+        // A tree belongs to the spot its foot is on: there is one only where there is coral at its
+        // foot or within 9 cm of it. So a tree at the edge of a clump is whole, including whatever
+        // part of it hangs out over the sand, and a small clump still gets the trees round its rim.
+        // (Where the cache cannot say, the tree is assumed to be there. This is only looked up for
+        // a point close enough to the tree to matter.)
+        var under = coralUnder(centre);
+        if (under > -1.5 && under < 0.02) {
+          under = max(coralUnder(centre + vec2f(0.09, 0.0)), max(coralUnder(centre + vec2f(-0.045, 0.078)), coralUnder(centre + vec2f(-0.045, -0.078))));
+          if (under < 0.02) { continue; }
+        }
         let fork = forkOf[kind] * (0.85 + 0.3 * r1);
         let turn = r1 * 6.2832;
         dt = branchTree(local, vec2f(cos(fork), sin(fork)), vec2f(cos(turn), sin(turn)), thickOf[kind], bushyOf[kind]);
       }
-      if (dt * size < d) {
-        d = dt * size;
+      if (dt * size * branchNarrow < d) {
+        d = dt * size * branchNarrow;
         branchKind = kind;
         branchShade = r2;
       }
@@ -1611,7 +1646,7 @@ fn depthAt(xz : vec2f, footprint : f32) -> f32 {
 //   r + g : the depth with the coral's heads smoothed over. It is split into a coarse part (a
 //           multiple of 25 cm) and the remainder, because one 16-bit number cannot hold tens of
 //           metres to millimetre accuracy but two can;
-//   b     : unused, always 0 (it once marked sand middles inside large coral patches);
+//   b     : how steep the bare sand is, in metres of fall per metre across (for the rock on slopes);
 //   a     : how deep into a coral patch the spot is (0 at its edge, negative outside it).
 // The cache holds the broad shape: shoals, relief, sand waves, and where the coral is and how high
 // it stands. The coral's individual heads and spikes are finer than a 6 cm sample can hold, so
@@ -1652,12 +1687,112 @@ fn bedLookup(xz : vec2f, footprint : f32) -> Bed {
     let core = clamp(s.a, 0.0, 1.0);
     let rise = min(core * 3.0, 1.0) * CORAL_HEAD;
     var head = 0.6;
-    if (detail > 0.0 && rise > 0.0 && s.b < 1.0) { head = mix(0.6, coralDomes(xz, BALL_SIZE, 300.0, 0.0), detail); }
-    cached = Bed(max(s.r + s.g - rise * (head - 0.6) * (1.0 - s.b), 0.05), core, head, s.b);
+    if (detail > 0.0 && rise > 0.0) { head = mix(0.6, coralDomes(xz, BALL_SIZE, 300.0, 0.0), detail); }
+    cached = Bed(max(s.r + s.g - rise * (head - 0.6), 0.05), core, head, 0.0);
   }
   if (trust >= 1.0) { return cached; }
   let exact = bedFromFormulas(xz, footprint);
   return Bed(mix(exact.depth, cached.depth, trust), mix(exact.core, cached.core, trust), mix(exact.head, cached.head, trust), mix(exact.middle, cached.middle, trust));
+}
+
+// ---------- rock on the slopes ----------
+// Sand does not lie on a steep slope: it slides off and leaves the rock under it showing. So where
+// the bare seabed is steep (and no coral grows), it is drawn as weathered rock instead of sand.
+// The rock is a surface pattern with its own light and shade, not extra shape: it changes how the
+// slope is colored and which way each spot faces the light, but not the slope's outline.
+//
+// The rock's roughness is a height made of four things added together, all sampled in 3D (map
+// position and depth) so that it does not stretch down a wall:
+//   - fractal noise: several layers, each twice as fine and a fixed fraction as strong as the last,
+//     which is what gives broken stone its look of big lumps carrying smaller lumps;
+//   - the same layers folded into sharp ridges;
+//   - lumpy cells, from the distance to the nearest of a scatter of points;
+//   - cracks, along the lines where two such cells meet (switched off: see the settings below).
+fn rockHash(p : vec3f) -> vec3f {
+  var q = fract(p * vec3f(0.1031, 0.1030, 0.0973));
+  q += dot(q, q.yxz + 33.33);
+  return fract((q.xxy + q.yxx) * q.zyx);
+}
+// Smooth noise built from random slopes at the corners of a grid, roughly -1 to 1
+fn rockNoise(p : vec3f) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  let a = dot(rockHash(i) * 2.0 - 1.0, f);
+  let b = dot(rockHash(i + vec3f(1.0, 0.0, 0.0)) * 2.0 - 1.0, f - vec3f(1.0, 0.0, 0.0));
+  let c = dot(rockHash(i + vec3f(0.0, 1.0, 0.0)) * 2.0 - 1.0, f - vec3f(0.0, 1.0, 0.0));
+  let d = dot(rockHash(i + vec3f(1.0, 1.0, 0.0)) * 2.0 - 1.0, f - vec3f(1.0, 1.0, 0.0));
+  let e = dot(rockHash(i + vec3f(0.0, 0.0, 1.0)) * 2.0 - 1.0, f - vec3f(0.0, 0.0, 1.0));
+  let g = dot(rockHash(i + vec3f(1.0, 0.0, 1.0)) * 2.0 - 1.0, f - vec3f(1.0, 0.0, 1.0));
+  let h = dot(rockHash(i + vec3f(0.0, 1.0, 1.0)) * 2.0 - 1.0, f - vec3f(0.0, 1.0, 1.0));
+  let k = dot(rockHash(i + vec3f(1.0, 1.0, 1.0)) * 2.0 - 1.0, f - vec3f(1.0, 1.0, 1.0));
+  return mix(mix(mix(a, b, w.x), mix(c, d, w.x), w.y), mix(mix(e, g, w.x), mix(h, k, w.x), w.y), w.z);
+}
+// Distances to the nearest and second-nearest of a scatter of points (one in each unit cube)
+fn rockCells(p : vec3f) -> vec2f {
+  let i = floor(p);
+  let f = fract(p);
+  var d = vec2f(8.0);
+  for (var x = -1; x <= 1; x++) {
+    for (var y = -1; y <= 1; y++) {
+      for (var z = -1; z <= 1; z++) {
+        let o = vec3f(f32(x), f32(y), f32(z));
+        let r = o + rockHash(i + o) - f;
+        let dd = dot(r, r);
+        if (dd < d.x) { d.y = d.x; d.x = dd; } else if (dd < d.y) { d.y = dd; }
+      }
+    }
+  }
+  return sqrt(d);
+}
+// The settings found to look best in the shader this came from. That shader's rock was a block
+// about two units tall; here one of its units is ROCK_UNIT metres, so its lumps come out about
+// 25 cm across on a wall a few metres high.
+const ROCK_UNIT : f32 = 2.0;        // metres to one unit of the original shader
+const ROCK_FREQ : f32 = 8.0;        // lumps per unit in the coarsest layer of noise
+const ROCK_HURST : f32 = 1.0;       // how quickly finer layers weaken: each is half the last
+const ROCK_AMP : f32 = 0.118;       // the parts' shares of the height, in units
+const ROCK_RIDGE : f32 = 0.1;
+const ROCK_CELLS : f32 = 0.12;
+const ROCK_CRACKS : f32 = 0.0;      // (none)
+const ROCK_CELL_FREQ : f32 = 8.0;   // cells per unit
+const ROCK_WARP : f32 = 0.5;        // how far, in units, slow noise pushes the pattern about before it is looked up
+// Bends the pattern with slow noise, so its lumps do not sit on an even grid (p in units)
+fn rockWarp(p : vec3f) -> vec3f {
+  let q = p * 0.9;
+  return p + ROCK_WARP * vec3f(rockNoise(q), rockNoise(q + vec3f(31.4, 5.2, 11.7)), rockNoise(q + vec3f(8.3, 47.1, 23.9)));
+}
+// The rock's height at a point, in units (within about 0.34 either way); p is in units too. `layers` is how many layers of
+// noise to add, and `fine` says whether pixels are small enough to show cells and cracks.
+fn rockHeight(p : vec3f, layers : i32, fine : bool) -> f32 {
+  let gain = exp2(-ROCK_HURST);
+  var q = p * ROCK_FREQ;
+  var a = 1.0;
+  var sum = vec2f(0.0);
+  for (var i = 0; i < layers; i++) {
+    let n = rockNoise(q);
+    sum += a * vec2f(n, 0.5 - 2.0 * abs(n));
+    q = q * 2.03 + vec3f(17.1, 3.7, 9.2);
+    a *= gain;
+  }
+  sum *= 1.0 - gain;
+  var h = ROCK_AMP * sum.x + ROCK_RIDGE * sum.y;
+  if (fine) {
+    let w = rockCells(p * ROCK_CELL_FREQ);
+    h += ROCK_CELLS * (0.5 - w.x);
+    if (ROCK_CRACKS > 0.0) { h -= ROCK_CRACKS * (1.0 - smoothstep(0.0, 0.07, w.y - w.x)); }
+  }
+  return h;
+}
+// How steep the bare sand is at a map position: from the seabed cache where it reaches, worked out
+// from the formulas beyond it.
+fn bedSteep(xz : vec2f) -> f32 {
+  if (u.p.y < 0.5) { return 0.0; }
+  let at = (xz - u.q.xy) / u.q.z + 0.5 * BED_SIZE;
+  let inside = min(min(at.x, at.y), BED_SIZE - max(at.x, at.y));
+  if (u.q.w > 0.5 && inside >= 34.0) { return textureSampleLevel(bedTex, linearSamp, at / BED_SIZE, 0.0).b; }
+  let here = sandDepthAt(xz);
+  return length(vec2f(sandDepthAt(xz + vec2f(1.0, 0.0)) - here, sandDepthAt(xz + vec2f(0.0, 1.0)) - here));
 }
 
 // Filling the seabed cache takes two passes. The first (fs_bedSand) works out the depth of the
@@ -1787,7 +1922,14 @@ fn fs_bed(@builtin(position) frag : vec4f) -> @location(0) vec4f {
   // between samples; stored stopped at zero, the edge followed the samples and came out in steps.
   var patchDepth = 0.0;
   if (u.e.x > 0.0) { patchDepth = clamp(coralInto(xz, sand, fromRim), -1.0, 1.0); }
-  return vec4f(coarse, smoothed - coarse, coral.z, patchDepth);
+  // How steep the bare sand is here, as metres of fall per metre across, measured over a metre
+  // (from the first pass's depths, half a metre to each side)
+  let reach = 0.5 / u.q.z;
+  let lim = vec2f(BED_SIZE - 1.0);
+  let ex = textureLoad(bedSandTex, vec2i(clamp(frag.xy + vec2f(reach, 0.0), vec2f(0.0), lim)), 0) - textureLoad(bedSandTex, vec2i(clamp(frag.xy - vec2f(reach, 0.0), vec2f(0.0), lim)), 0);
+  let ez = textureLoad(bedSandTex, vec2i(clamp(frag.xy + vec2f(0.0, reach), vec2f(0.0), lim)), 0) - textureLoad(bedSandTex, vec2i(clamp(frag.xy - vec2f(0.0, reach), vec2f(0.0), lim)), 0);
+  let steep = length(vec2f(ex.r + ex.g, ez.r + ez.g));
+  return vec4f(coarse, smoothed - coarse, steep, patchDepth);
 }
 
 // Coral kinds. There are six, the commonest first: brown, yellow, orange, red, purple, pink. A
@@ -1805,8 +1947,15 @@ fn coralKind(pick : f32) -> i32 {
 }
 // A kind's color; `shade` (0 to 1) makes one growth a little lighter or darker than another of its kind.
 fn coralColor(kind : i32, shade : f32) -> vec3f {
-  let colors = array<vec3f, 6>(vec3f(0.27, 0.18, 0.10), vec3f(0.44, 0.35, 0.07), vec3f(0.44, 0.21, 0.05),
-                               vec3f(0.38, 0.08, 0.06), vec3f(0.27, 0.12, 0.26), vec3f(0.42, 0.17, 0.22));
+  // "Yellow" coral is really a golden brown. Brown is not a color of light of its own: it is what
+  // orange and yellow look like when they are much darker than their surroundings. But yellow that
+  // is simply darkened turns olive, because a dim yellow reads as greenish. To come out brown it
+  // also has to be turned toward orange (less green in it) and made less pure. So the yellow here
+  // is darker than the sand, redder than a true yellow, and a little greyed. Pink is a dusty rose
+  // for the same reason: at full strength it was the brightest thing on the reef.
+  // (Red and purple are left a little stronger than the rest, as the accents.)
+  let colors = array<vec3f, 6>(vec3f(0.25, 0.165, 0.095), vec3f(0.33, 0.215, 0.075), vec3f(0.37, 0.185, 0.06),
+                               vec3f(0.41, 0.08, 0.065), vec3f(0.28, 0.12, 0.29), vec3f(0.32, 0.155, 0.165));
   return colors[kind] * mix(0.8, 1.25, shade);
 }
 
@@ -2159,12 +2308,51 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     // so they only tilt the sand's surface, and they are dropped where a pixel is too coarse to show
     // them. Coral covers them.
     // Skipped entirely with the Sand waves box unticked, and where there is nothing to show.
-    let rippleShow = u.i.w * clamp(0.15 / footprint - 0.5, 0.0, 1.0) * (1.0 - cover);
+    // Like the sand waves they ride on, they are the current's work, so they fade with depth at the
+    // same rate and are gone on the ocean floor.
+    let rippleShow = u.i.w * clamp(0.15 / footprint - 0.5, 0.0, 1.0) * (1.0 - cover) * exp(-depth / SAND_WAVE_FADE);
     if (rippleShow > 0.0) {
       let rippleDir = vec2f(cos(WIND_ANGLE + 0.5), sin(WIND_ANGLE + 0.5));
       let ripplePhase = dot(rippleDir, bxz) * 11.0 + 5.0 * vnoise(vec3f(bxz * 0.6, 2.0));
       let rippleSlope = 0.45 * rippleShow * cos(ripplePhase);
       bedNormal = normalize(bedNormal - vec3f(rippleDir.x, 0.0, rippleDir.y) * rippleSlope);
+    }
+
+    // Rock (see rockHeight), in two places.
+    // On steep bare slopes: grey-brown stone. Coral wins: where coral covers the bed there is none.
+    // It comes in between a fall of about 45 cm and 85 cm per metre (slopes of about 25 to 40
+    // degrees), and it fades out where a pixel covers more than about a metre of seabed.
+    // On the coral's mounds, wherever the coral is near enough to be drawn in full (the same test
+    // that decides whether its branches are drawn): the mound the branches stand on is old reef
+    // rock, so there it gets the same rough surface in dark brown and dark maroon, in place of the
+    // flat patches of color that stand in for the coral further off.
+    let seen = u.r.w * max(clamp(0.028 / footprint - 0.6, 0.0, 1.0), viewFocus * clamp(0.05 / pixelAcross - 0.6, 0.0, 1.0));
+    let rocky = select(0.0, smoothstep(0.45, 0.85, bedSteep(bxz)) * (1.0 - cover), cover < 1.0);
+    let moundy = cover * seen;
+    if (rocky + moundy > 0.0) {
+      let rp = rockWarp(vec3f(bxz.x, -depth, bxz.y) / ROCK_UNIT);      // (in the original shader's units)
+      // Fewer layers of noise where pixels are too coarse to show the fine ones
+      let lump = ROCK_UNIT / ROCK_FREQ;            // metres across the coarsest lumps
+      let layers = i32(clamp(5.5 - log2(max(footprint * 6.0 / lump, 1.0)), 1.0, 5.0));
+      let fine = footprint < 0.5 * ROCK_UNIT / ROCK_CELL_FREQ;
+      let e = max(0.012, 0.7 * footprint);        // metres
+      let h = rockHeight(rp, layers, fine);
+      // Which way the rock's bumps tilt the surface, from how its height changes a step each way
+      let tilt = vec2f(rockHeight(rp + vec3f(e / ROCK_UNIT, 0.0, 0.0), layers, fine), rockHeight(rp + vec3f(0.0, 0.0, e / ROCK_UNIT), layers, fine)) - h;
+      let bumps = clamp(1.0 - footprint / 1.2, 0.0, 1.0);
+      let amount = min(rocky + moundy, 1.0);
+      bedNormal = normalize(bedNormal - vec3f(tilt.x, 0.0, tilt.y) * (ROCK_UNIT / e) * amount * bumps);
+      // Mottled in patches, speckled with mineral grain, and darker in its hollows, where dirt
+      // gathers and less light gets in
+      let hollow = smoothstep(-1.0, 0.5, h / (ROCK_AMP + ROCK_RIDGE + ROCK_CELLS + ROCK_CRACKS));
+      let mottle = 0.5 + 0.5 * rockNoise(rp * 3.0);
+      let marks = (0.9 + 0.25 * rockNoise(rp * 70.0) * step(footprint, 0.02)) * mix(1.0, mix(0.5, 1.05, hollow), bumps);
+      let stone = mix(vec3f(0.21, 0.195, 0.18), vec3f(0.42, 0.39, 0.35), mottle) * marks;
+      // (the mound keeps the shading of its rounded heads: paler on top of each, darker in the creases)
+      // (dark brown in some patches and dark maroon in others)
+      let reefRock = mix(vec3f(0.17, 0.105, 0.065), vec3f(0.19, 0.06, 0.065), smoothstep(0.35, 0.65, mottle)) * marks * mix(0.55, 1.1, bed.head) * keepHue(depth, t, ts);
+      bedAlbedo = mix(mix(bedAlbedo, stone, rocky), reefRock, moundy);
+      bedShade *= mix(1.0, mix(0.6, 1.0, hollow), amount * bumps);
     }
 
     // Shadows on the bed: climb from this spot back toward the sun along the bent sunlight and
@@ -2201,7 +2389,17 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     // are kept until that reaches about 8 cm. At that range they are drawn no thinner than a
     // pixel, so they are coarser than life, but they do not shimmer.
     let branchNear = max(clamp(0.028 / footprint - 0.6, 0.0, 1.0), viewFocus * clamp(0.05 / pixelAcross - 0.6, 0.0, 1.0));
-    let branchShow = u.r.w * branchNear * step(0.02, bed.core) * (1.0 - smoothstep(0.25, 0.7, bed.middle));
+    // Branches are looked for wherever the ray landed on coral, and also where it landed on sand
+    // but passed close to coral on the way down, because a tree at the edge of a clump reaches
+    // out past the clump's foot (further when it sways). Going only by where the ray landed used
+    // to slice such a tree off along the outline of the coral under it.
+    var nearCoral = bed.core;
+    if (nearCoral < 0.02 && u.r.w * branchNear > 0.0) {
+      let across = 0.2 * normalize(vec2f(-slide.y, slide.x) + vec2f(1e-5, 0.0));
+      nearCoral = max(max(coralUnder(bxz - slide * 0.25), coralUnder(bxz - slide * 0.55)),
+                      max(max(coralUnder(bxz + across), coralUnder(bxz - across)), coralUnder(bxz + normalize(slide + vec2f(1e-5, 0.0)) * 0.2)));
+    }
+    let branchShow = u.r.w * branchNear * step(0.02, nearCoral) * (1.0 - smoothstep(0.25, 0.7, bed.middle));
     if (branchShow > 0.0) {
       let share = 0.95 * u.r.w;                     // the fraction of squares with a tree
       let drop = max(-t.y, 1e-3);                   // metres of depth gained per metre along the ray
@@ -2223,6 +2421,7 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
         // Where the heads are near the surface the thicket is squashed to fit under it: heights are
         // stretched by `squash` before the trees are looked up, so a full tree is found in less room.
         let squash = BRANCH_TOP / branchRoom(heads);
+        branchNarrow = clamp(pow(1.0 / squash, 0.33), 0.5, 1.0);
         let height = (heads - headShift - dv) * squash;
         // While the ray is still above the layer, nothing can be in its way, so it drops straight
         // to the layer's top (with a margin for the unevenness of the heads)
@@ -2279,7 +2478,7 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
         // and brightest out at the tips
         let tint = coralColor(kindTouched, shadeTouched) * keepHue(depth - at.y / touchedSquash, t, ts);
         let bloom = clamp(at.y / (BRANCH_TOP * 0.8), 0.0, 1.0);
-        let branchAlbedo = mix(mix(vec3f(0.16, 0.13, 0.10), tint, 0.4), tint * 2.0 + 0.1, bloom * bloom) * hemmed;
+        let branchAlbedo = mix(mix(vec3f(0.16, 0.13, 0.10), tint, 0.4), tint * 1.6 + 0.02, bloom * bloom) * hemmed;
         bedAlbedo = mix(bedAlbedo, branchAlbedo, branchShow);
         wrap = 0.6 * branchShow;
         bedNormal = normalize(mix(bedNormal, faces, branchShow));
@@ -2358,7 +2557,9 @@ fn waterBody(surf : vec3f, t : vec3f, shadowed : bool, footprint : f32) -> vec3f
     // The nearest fish found by any of them is the one seen.
     let column = fishSpread(layer);
     let downRate = max(-t.y, 1e-3);            // metres of depth per metre along the ray
-    let tries = i32(clamp(ceil(column * length(slide) / 0.9) + 1.0, 1.0, 4.0));
+    // (up to eight: a column as tall as the deepest swimming depth, seen at the lowest angle the
+    // water allows, needs that many)
+    let tries = i32(clamp(ceil(column * length(slide) / 0.9) + 1.0, 1.0, 8.0));
     var nearestFish = 1e9;
     var seenAt = reached;
     for (var k = 0; k < tries; k++) {
